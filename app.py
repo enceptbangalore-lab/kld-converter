@@ -7,14 +7,14 @@ from io import BytesIO
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Multi-Layout Smart Version)")
-st.caption("Upload any KLD Excel — app auto-detects job name, dimensions, top & side sequences.")
+st.title("📏 KLD Excel → CSV Converter (Enhanced)")
+st.caption("Upload any KLD Excel — app auto-detects job name, dimensions, sequences, and notes.")
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
 
 # ---------------------------------------------------
-# Helper functions
+# Helpers
 # ---------------------------------------------------
 def is_number(x):
     try:
@@ -25,7 +25,6 @@ def is_number(x):
 
 
 def clean_numeric_list(seq):
-    """Keep only numbers; cast 1.0→1 if integer."""
     out = []
     for v in seq:
         if is_number(v):
@@ -35,7 +34,7 @@ def clean_numeric_list(seq):
 
 
 # ---------------------------------------------------
-# Extraction Logic
+# Core Extraction Logic
 # ---------------------------------------------------
 def extract_kld_data(df):
     df = df.fillna("").astype(str)
@@ -59,17 +58,36 @@ def extract_kld_data(df):
                 width_mm, cut_length_mm = map(int, nums[:2])
                 break
 
-    # --- 3. Top sequence: find row with most pure numeric cells ---
+    # --- 3. Pack note (e.g., '13 biscuits on edge') ---
+    pack_note = ""
+    for row in df.values:
+        joined = " ".join(row)
+        if re.search(r"biscuits\s+on\s+edge", joined, re.IGNORECASE):
+            pack_note = joined.strip()
+            break
+
+    # --- 4. Print Area (collect all 'Print Area' occurrences) ---
+    print_areas = []
+    for row in df.values:
+        joined = " ".join(row)
+        matches = re.findall(r"Print\s*Area[^,;]*", joined, re.IGNORECASE)
+        for m in matches:
+            clean = re.sub(r"\s+", " ", m.strip())
+            if clean not in print_areas:
+                print_areas.append(clean)
+    print_area_str = ", ".join(print_areas)
+
+    # --- 5. Top sequence: longest numeric row ---
     top_seq = ""
     max_count = 0
     for i in range(len(df)):
         row = df.iloc[i].tolist()
         nums = clean_numeric_list(row)
-        if len(nums) > max_count and len(nums) >= 5:  # avoid short false positives
+        if len(nums) > max_count and len(nums) >= 5:
             max_count = len(nums)
             top_seq = ",".join(nums)
 
-    # --- 4. Side sequence: find column with most pure numeric cells ---
+    # --- 6. Side sequence: longest numeric column ---
     side_seq = ""
     max_col = 0
     for c in df.columns:
@@ -79,7 +97,7 @@ def extract_kld_data(df):
             max_col = len(nums)
             side_seq = ",".join(nums)
 
-    return job_name, width_mm, cut_length_mm, top_seq, side_seq
+    return job_name, width_mm, cut_length_mm, top_seq, side_seq, pack_note, print_area_str
 
 
 # ---------------------------------------------------
@@ -89,14 +107,25 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
 
     try:
-        job_name, width_mm, cut_length_mm, top_seq, side_seq = extract_kld_data(df)
+        (
+            job_name,
+            width_mm,
+            cut_length_mm,
+            top_seq,
+            side_seq,
+            pack_note,
+            print_area_str,
+        ) = extract_kld_data(df)
 
+        # Build output dataframe
         output_df = pd.DataFrame([{
             "job_name": job_name,
             "width_mm": width_mm,
             "cut_length_mm": cut_length_mm,
             "top_seq": top_seq,
             "side_seq": side_seq,
+            "pack_note": pack_note,
+            "print_area": print_area_str,
             "photocell_w": 8,
             "photocell_h": 12,
             "photocell_offset_right_mm": 12,
@@ -108,7 +137,10 @@ if uploaded_file:
         st.success(f"✅ Processed successfully for **{job_name}**")
         st.download_button("⬇️ Download CSV File", csv_bytes, f"{job_name}_converted.csv", "text/csv")
         st.dataframe(output_df)
-        st.caption(f"Detected top_seq length: {len(top_seq.split(','))} | side_seq length: {len(side_seq.split(','))}")
+        st.caption(
+            f"Detected top_seq length: {len(top_seq.split(','))} | "
+            f"side_seq length: {len(side_seq.split(','))}"
+        )
 
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
