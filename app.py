@@ -7,8 +7,8 @@ from io import BytesIO
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Enhanced)")
-st.caption("Upload any KLD Excel — app auto-detects job name, dimensions, sequences, and notes.")
+st.title("📏 KLD Excel → CSV Converter (Final Enhanced Version)")
+st.caption("Upload any KLD Excel — auto-detects job name, dimensions, sequences, print area, and photocell size (smaller=width, larger=height).")
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
@@ -66,7 +66,7 @@ def extract_kld_data(df):
             pack_note = joined.strip()
             break
 
-    # --- 4. Print Area (collect all 'Print Area' occurrences) ---
+    # --- 4. Print Area ---
     print_areas = []
     for row in df.values:
         joined = " ".join(row)
@@ -77,7 +77,22 @@ def extract_kld_data(df):
                 print_areas.append(clean)
     print_area_str = ", ".join(print_areas)
 
-    # --- 5. Top sequence: longest numeric row ---
+    # --- 5. Photocell (detect and auto-sort smaller→width, larger→height) ---
+    photocell_w, photocell_h = 6, 12  # default
+    for row in df.values:
+        joined = " ".join(row)
+        if "PHOTO" in joined.upper():  # detect 'Photocell' or 'Photo mark'
+            nums = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", joined)]
+            if len(nums) >= 2:
+                nums = sorted(nums)  # smaller first
+                photocell_w, photocell_h = nums[0], nums[1]
+                break
+            elif len(nums) == 1:
+                photocell_w = float(nums[0])
+                photocell_h = max(12.0, photocell_w)  # fallback
+                break
+
+    # --- 6. Top sequence ---
     top_seq = ""
     max_count = 0
     for i in range(len(df)):
@@ -87,7 +102,7 @@ def extract_kld_data(df):
             max_count = len(nums)
             top_seq = ",".join(nums)
 
-    # --- 6. Side sequence: longest numeric column ---
+    # --- 7. Side sequence ---
     side_seq = ""
     max_col = 0
     for c in df.columns:
@@ -97,7 +112,17 @@ def extract_kld_data(df):
             max_col = len(nums)
             side_seq = ",".join(nums)
 
-    return job_name, width_mm, cut_length_mm, top_seq, side_seq, pack_note, print_area_str
+    return (
+        job_name,
+        width_mm,
+        cut_length_mm,
+        top_seq,
+        side_seq,
+        pack_note,
+        print_area_str,
+        photocell_w,
+        photocell_h,
+    )
 
 
 # ---------------------------------------------------
@@ -115,6 +140,8 @@ if uploaded_file:
             side_seq,
             pack_note,
             print_area_str,
+            photocell_w,
+            photocell_h,
         ) = extract_kld_data(df)
 
         # Build output dataframe
@@ -126,8 +153,8 @@ if uploaded_file:
             "side_seq": side_seq,
             "pack_note": pack_note,
             "print_area": print_area_str,
-            "photocell_w": 8,
-            "photocell_h": 12,
+            "photocell_w": photocell_w,
+            "photocell_h": photocell_h,
             "photocell_offset_right_mm": 12,
             "stroke_mm": 0.25,
             "brand_label": "BRANDING"
