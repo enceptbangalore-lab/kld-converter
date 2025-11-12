@@ -5,8 +5,8 @@ import io
 import html
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final v8)")
-st.caption("Reads Excel, extracts dimensions & sequences, and generates an editable SVG dieline for Illustrator QC.")
+st.title("📏 KLD Excel → SVG Generator (Final v7)")
+st.caption("Reads Excel, extracts dimensions, sequences & generates an editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
 # Helper Functions
@@ -159,7 +159,7 @@ def extract_kld_data(df):
 
 
 # ---------------------------------------------------
-# SVG Generator (Final clean version)
+# SVG Generator (your final spec)
 # ---------------------------------------------------
 
 def make_svg(data):
@@ -176,11 +176,13 @@ def make_svg(data):
     H = float(data.get("width_mm") or 0)
     top_seq = parse_seq(data.get("top_seq"))
     side_seq = parse_seq(data.get("side_seq"))
+    pcw = float(data.get("photocell_w") or 6)
+    pch = float(data.get("photocell_h") or 12)
+    pc_off = float(data.get("photocell_offset_right_mm") or 12)
     brand_label = str(data.get("brand_label") or "BRANDING")
 
-    # final styling parameters
     dieline = "#92278f"
-    stroke_pt = 3.175        # updated stroke width
+    stroke_pt = 0.356
     font_pt = 3.2
     tick_short = 5.0
     top_shift_up = 5.0
@@ -195,12 +197,22 @@ def make_svg(data):
     out.append(f'.text{{font-family:Arial; font-size:{font_pt}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Outer dieline box only
+    # Outer dieline
     out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
 
-    # Measurement ticks and labels
+    # Fold lines
+    x = 0
+    for v in top_seq[:-1]:
+        x += v
+        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style="stroke-dasharray:1,1"/>')
+
+    y = 0
+    for v in side_seq[:-1]:
+        y += v
+        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dieline" style="stroke-dasharray:1,1"/>')
+
+    # Measurements
     out.append('<g id="Measurements">')
-    # TOP
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
@@ -208,8 +220,6 @@ def make_svg(data):
         out.append(f'<line x1="{x}" y1="{-top_shift_up}" x2="{x}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
         mid = x - v/2
         out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
-
-    # LEFT
     y = 0
     out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
     for v in side_seq:
