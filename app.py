@@ -217,7 +217,7 @@ def make_svg(data):
         y += v
         x1 = x_offset
         x2 = x_offset + max_top
-        out.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" class="dieline" style="stroke-dasharray:1,1"/>')
+        out.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" class="dieline"/>')
 
 
 
