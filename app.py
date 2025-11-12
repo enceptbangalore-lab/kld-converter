@@ -4,17 +4,22 @@ import re
 import numpy as np
 import io
 
+# ---------------------------------------------------
+# Streamlit Configuration
+# ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
 st.title("📏 KLD Excel → CSV Converter (Refined Header Detection)")
 st.caption(
     "Reads KLD Excel (.xls/.xlsx), detects header lines cleanly, "
-    "keeps them under job_name, moves Print Area to finarea, and trims sequences (±1 mm)."
+    "extracts job name, dimensions, and numeric sequences accurately."
 )
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 show_debug = st.checkbox("Show debug info", value=False)
 
-
+# ---------------------------------------------------
+# Helpers
+# ---------------------------------------------------
 def is_number(x):
     try:
         float(x)
@@ -38,43 +43,53 @@ def auto_trim_to_target(values, target, tol=1.0):
     return vals
 
 
+# ---------------------------------------------------
+# Core Extraction Logic
+# ---------------------------------------------------
 def extract_kld_data(df):
     df = df.fillna("").astype(str)
+    # Drop empty rows
+    df = df[df.apply(lambda r: any(str(x).strip() for x in r), axis=1)].reset_index(drop=True)
 
     header_lines = []
     finarea = ""
     start_row = 0
 
-    for i in range(min(30, len(df))):
+    # --- Detect where numeric section starts ---
+    for i in range(min(40, len(df))):
         row = df.iloc[i].tolist()
-        text = " ".join([s.strip() for s in row if s.strip()])
+        line_text = " ".join([s.strip() for s in row if str(s).strip()])
         nums = clean_numeric_list(row)
 
-        if re.search(r"Print\s*Area", text, re.IGNORECASE):
-            finarea = text.strip()
+        if re.search(r"Print\s*Area", line_text, re.IGNORECASE):
+            finarea = line_text.strip()
             continue
 
-        # Fix: numeric data often begins where a majority of cells are numeric
         numeric_ratio = sum(is_number(x) for x in row) / max(1, len(row))
         if len(nums) >= 3 or numeric_ratio > 0.5:
             start_row = i
             break
 
-        if text:
-            header_lines.append(text)
+        if line_text:
+            header_lines.append(line_text)
 
-    job_name = "\n".join(header_lines) if header_lines else "Unknown"
+    # --- Job name ---
+    job_name = header_lines[0] if header_lines else "Unknown"
+
+    # --- Slice after headers ---
     df = df.iloc[start_row:].reset_index(drop=True)
 
+    # --- Dimensions detection (robust pattern) ---
     width_mm = cut_length_mm = 0
     for row in df.values:
         joined = " ".join(row)
-        if "DIMENSION" in joined.upper():
-            nums = re.findall(r"\d+", joined)
-            if len(nums) >= 2:
-                width_mm, cut_length_mm = map(int, nums[:2])
-                break
+        match = re.search(r"(\d+)\s*[*xX]\s*(\d+)", joined)
+        if match:
+            width_mm = int(match.group(1))
+            cut_length_mm = int(match.group(2))
+            break
 
+    # --- Pack note detection ---
     pack_note = ""
     for row in df.values:
         joined = " ".join(row)
@@ -82,6 +97,7 @@ def extract_kld_data(df):
             pack_note = joined.strip()
             break
 
+    # --- Photocell detection ---
     photocell_w, photocell_h = 6, 12
     for row in df.values:
         joined = " ".join(row)
@@ -94,6 +110,7 @@ def extract_kld_data(df):
                 photocell_w, photocell_h = nums[0], nums[1]
                 break
 
+    # --- Top & Side Sequences ---
     top_seq_nums, best_diff = [], float("inf")
     for i in range(len(df)):
         nums = clean_numeric_list(df.iloc[i].tolist())
@@ -110,21 +127,37 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, side_seq_nums = diff, nums
 
+    # --- Trim to dimension target ---
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm, tol=1.0)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm, tol=1.0)
 
     if show_debug:
-        st.write("Header lines detected:", header_lines)
+        st.write("Header lines:", header_lines)
+        st.write(f"Job name: {job_name}")
+        st.write(f"Dimensions: {width_mm} × {cut_length_mm}")
         st.write(f"finarea: {finarea}")
-        st.write(f"Top seq sum: {sum(top_seq_trimmed)} / {cut_length_mm}")
-        st.write(f"Side seq sum: {sum(side_seq_trimmed)} / {width_mm}")
+        st.write(f"Top seq sum = {sum(top_seq_trimmed)} (target {cut_length_mm})")
+        st.write(f"Side seq sum = {sum(side_seq_trimmed)} (target {width_mm})")
 
     top_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed])
     side_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in side_seq_trimmed])
 
-    return job_name, width_mm, cut_length_mm, top_seq, side_seq, pack_note, finarea, photocell_w, photocell_h
+    return (
+        job_name,
+        width_mm,
+        cut_length_mm,
+        top_seq,
+        side_seq,
+        pack_note,
+        finarea,
+        photocell_w,
+        photocell_h,
+    )
 
 
+# ---------------------------------------------------
+# Streamlit Main Flow
+# ---------------------------------------------------
 if uploaded_file:
     ext = uploaded_file.name.split(".")[-1].lower()
     file_bytes = uploaded_file.read()
@@ -132,7 +165,7 @@ if uploaded_file:
 
     try:
         if ext == "xls":
-            import xlrd
+            import xlrd  # Ensure xlrd==1.2.0 installed
             df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="xlrd")
         else:
             df = pd.read_excel(io.BytesIO(file_bytes), header=None, engine="openpyxl")
