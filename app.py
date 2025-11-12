@@ -4,10 +4,9 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Refined v3)")
+st.title("📏 KLD Excel → CSV Converter (Final v4)")
 st.caption(
-    "Keeps full job header (including Count/kg), removes non-header lines like Photocell info, "
-    "and extracts both finarea (left/right) and printarea correctly."
+    "Reads Excel, keeps clean header (including Count/kg), detects dimensions, extracts print/fin area, and computes sequences."
 )
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
@@ -18,6 +17,7 @@ show_raw = st.checkbox("Show raw sheet preview", value=False)
 # Helpers
 # ---------------------------------------------------
 def clean_numeric_list(seq):
+    """Extract numeric floats from list cells."""
     out = []
     for v in seq:
         s = str(v).strip().replace(",", "")
@@ -41,11 +41,19 @@ def first_pair_from_text(text):
     return 0, 0
 
 
+def auto_trim_to_target(values, target, tol=1.0):
+    """Trim numeric sequence to sum near target ± tol."""
+    vals = values.copy()
+    while len(vals) > 1 and target > 0 and sum(vals) > target + tol:
+        vals.pop()
+    return vals
+
+
 def extract_print_areas(lines):
     """Extract Print Area (left/right) and Printing Area (main)."""
     finarea_left = finarea_right = printarea = ""
     for ln in lines:
-        # PRINT AREA LEFT/RIGHT
+        # Print Area - left/right
         if re.search(r"print\s*area", ln, re.IGNORECASE):
             pairs = re.findall(r"(\d+)\s*[*xX]\s*(\d+)", ln)
             if len(pairs) == 1:
@@ -54,7 +62,7 @@ def extract_print_areas(lines):
                 finarea_left = f"{pairs[0][0]}x{pairs[0][1]} mm"
                 finarea_right = f"{pairs[1][0]}x{pairs[1][1]} mm"
 
-        # PRINTING AREA (separate from Print Area)
+        # Printing Area (main)
         if re.search(r"printing\s*area", ln, re.IGNORECASE):
             w, h = first_pair_from_text(ln)
             if w and h:
@@ -83,7 +91,7 @@ def extract_kld_data(df):
     header_lines = []
     start_row = 0
 
-    # Collect header lines until numeric data
+    # Collect header lines
     for i in range(min(60, len(df))):
         row = df.iloc[i].tolist()
         line_text = " ".join([s.strip() for s in row if s.strip()])
@@ -103,7 +111,7 @@ def extract_kld_data(df):
     # --- Extract sections ---
     search_lines = [
         " ".join([str(x).strip() for x in df.iloc[i].tolist() if str(x).strip()])
-        for i in range(max(0, start_row - 10), min(len(df), start_row + 50))
+        for i in range(max(0, start_row - 10), min(len(df), start_row + 80))
     ]
 
     width_mm, cut_length_mm = extract_dimensions(search_lines)
@@ -127,10 +135,40 @@ def extract_kld_data(df):
             pack_note = ln.strip()
             break
 
+    # --- Numeric sequences ---
+    df_num = df.iloc[start_row:].reset_index(drop=True)
+    top_seq_nums, side_seq_nums = [], []
+
+    # Find top sequence (rows) — matches cut_length
+    best_diff = float("inf")
+    for i in range(len(df_num)):
+        nums = clean_numeric_list(df_num.iloc[i].tolist())
+        if len(nums) >= 4:
+            diff = abs(sum(nums) - cut_length_mm) if cut_length_mm else sum(nums)
+            if diff < best_diff:
+                best_diff, top_seq_nums = diff, nums
+
+    # Find side sequence (columns) — matches width
+    best_diff = float("inf")
+    for c in df_num.columns:
+        nums = clean_numeric_list(df_num[c].tolist())
+        if len(nums) >= 3:
+            diff = abs(sum(nums) - width_mm) if width_mm else sum(nums)
+            if diff < best_diff:
+                best_diff, side_seq_nums = diff, nums
+
+    top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
+    side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
+
+    top_seq = ",".join(str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed)
+    side_seq = ",".join(str(int(v)) if v.is_integer() else str(v) for v in side_seq_trimmed)
+
     return {
         "job_name": job_name,
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
+        "top_seq": top_seq,
+        "side_seq": side_seq,
         "finarea_left": finarea_left,
         "finarea_right": finarea_right,
         "printarea": printarea,
@@ -160,10 +198,13 @@ if uploaded_file:
 
     try:
         res = extract_kld_data(df)
+
         output_df = pd.DataFrame([{
             "job_name": res["job_name"],
             "width_mm": res["width_mm"],
             "cut_length_mm": res["cut_length_mm"],
+            "top_seq": res["top_seq"],
+            "side_seq": res["side_seq"],
             "finarea_left": res["finarea_left"],
             "finarea_right": res["finarea_right"],
             "printarea": res["printarea"],
@@ -181,7 +222,9 @@ if uploaded_file:
             for i, l in enumerate(res["job_name"].splitlines(), start=1):
                 st.write(f"{i}. {l}")
             st.write(f"Width×Cut: {res['width_mm']}×{res['cut_length_mm']}")
-            st.write(f"FinArea Left: {res['finarea_left']} | FinArea Right: {res['finarea_right']}")
+            st.write(f"Top seq: {res['top_seq']}")
+            st.write(f"Side seq: {res['side_seq']}")
+            st.write(f"FinArea Left: {res['finarea_left']} | Right: {res['finarea_right']}")
             st.write(f"PrintArea: {res['printarea']}")
             st.write(f"Pack Note: {res['pack_note']}")
             st.write(f"Photocell: {res['photocell_w']}×{res['photocell_h']}")
