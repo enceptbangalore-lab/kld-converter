@@ -7,8 +7,8 @@ from io import BytesIO
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Final Enhanced Version)")
-st.caption("Upload any KLD Excel — auto-detects job name, dimensions, sequences, print area, and photocell size (smaller=width, larger=height).")
+st.title("📏 KLD Excel → CSV Converter (Refined with Area Detection)")
+st.caption("Automatically detects job name, dimensions, valid KLD area, and photocell (filters irrelevant values).")
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
@@ -29,7 +29,7 @@ def clean_numeric_list(seq):
     for v in seq:
         if is_number(v):
             f = float(v)
-            out.append(str(int(f)) if f.is_integer() else str(f))
+            out.append(f)
     return out
 
 
@@ -58,7 +58,7 @@ def extract_kld_data(df):
                 width_mm, cut_length_mm = map(int, nums[:2])
                 break
 
-    # --- 3. Pack note (e.g., '13 biscuits on edge') ---
+    # --- 3. Pack note ---
     pack_note = ""
     for row in df.values:
         joined = " ".join(row)
@@ -77,22 +77,24 @@ def extract_kld_data(df):
                 print_areas.append(clean)
     print_area_str = ", ".join(print_areas)
 
-    # --- 5. Photocell (detect and auto-sort smaller→width, larger→height) ---
-    photocell_w, photocell_h = 6, 12  # default
+    # --- 5. Photocell (filter product lines, use only 'photo'/'mark' lines) ---
+    photocell_w, photocell_h = 6, 12  # defaults
     for row in df.values:
         joined = " ".join(row)
-        if "PHOTO" in joined.upper():  # detect 'Photocell' or 'Photo mark'
+        upper = joined.upper()
+        if ("PHOTO" in upper or "MARK" in upper) and not re.search(r"KLD|COUNT|G\b", upper):
             nums = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", joined)]
+            nums = [n for n in nums if 2 <= n <= 50]  # valid mm range filter
             if len(nums) >= 2:
-                nums = sorted(nums)  # smaller first
+                nums = sorted(nums)
                 photocell_w, photocell_h = nums[0], nums[1]
                 break
             elif len(nums) == 1:
-                photocell_w = float(nums[0])
-                photocell_h = max(12.0, photocell_w)  # fallback
+                photocell_w = nums[0]
+                photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 6. Top sequence ---
+    # --- 6. Top sequence (remove outside KLD area noise) ---
     top_seq = ""
     max_count = 0
     for i in range(len(df)):
@@ -100,7 +102,16 @@ def extract_kld_data(df):
         nums = clean_numeric_list(row)
         if len(nums) > max_count and len(nums) >= 5:
             max_count = len(nums)
-            top_seq = ",".join(nums)
+            top_seq_nums = nums
+
+    # Filter out any trailing tiny segment (e.g., ≤15 mm or after huge jump)
+    if max_count > 0:
+        diffs = [abs(top_seq_nums[i+1] - top_seq_nums[i]) for i in range(len(top_seq_nums)-1)]
+        cutoff = len(top_seq_nums)
+        if top_seq_nums[-1] <= 15 or (len(diffs) > 0 and diffs[-1] > 100):
+            cutoff -= 1
+        top_seq_nums = top_seq_nums[:cutoff]
+        top_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in top_seq_nums])
 
     # --- 7. Side sequence ---
     side_seq = ""
@@ -110,7 +121,7 @@ def extract_kld_data(df):
         nums = clean_numeric_list(col)
         if len(nums) > max_col and len(nums) >= 3:
             max_col = len(nums)
-            side_seq = ",".join(nums)
+            side_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in nums])
 
     return (
         job_name,
