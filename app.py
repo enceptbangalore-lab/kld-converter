@@ -8,10 +8,10 @@ import io
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Final Multi-Header + XLS/XLSX Version)")
+st.title("📏 KLD Excel → CSV Converter (Final Version with finarea & full headers)")
 st.caption(
-    "Detects KLD dimensions, handles multi-line headers, trims by physical size (±1 mm), "
-    "and extracts print/photocell details."
+    "Reads KLD Excel (.xls/.xlsx), combines header lines into job_name, "
+    "extracts print area to finarea, trims sequences within ±1 mm."
 )
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
@@ -27,7 +27,6 @@ def is_number(x):
     except:
         return False
 
-
 def clean_numeric_list(seq):
     out = []
     for v in seq:
@@ -36,7 +35,6 @@ def clean_numeric_list(seq):
             out.append(f)
     return out
 
-
 def auto_trim_to_target(values, target, tol=1.0):
     """Trim from end until total ≤ target + tol."""
     vals = values.copy()
@@ -44,31 +42,30 @@ def auto_trim_to_target(values, target, tol=1.0):
         vals.pop()
     return vals
 
-
 # ---------------------------------------------------
 # Core Extraction Logic
 # ---------------------------------------------------
 def extract_kld_data(df):
     df = df.fillna("").astype(str)
 
-    # --- 1. Detect header depth & skip it dynamically ---
+    # --- 1. Detect header depth and collect header lines ---
+    header_lines = []
     start_row = 0
-    for i in range(min(10, len(df))):
+    for i in range(min(12, len(df))):
         row = df.iloc[i].tolist()
+        line_text = " ".join([str(x).strip() for x in row if str(x).strip() != ""])
+        if line_text:
+            header_lines.append(line_text)
         numeric_count = len(clean_numeric_list(row))
         if numeric_count >= 3:
             start_row = i
             break
+
+    full_header_text = " / ".join(header_lines)
     df = df.iloc[start_row:].reset_index(drop=True)
 
-    # --- 2. Job name ---
-    job_name = "Unknown"
-    for row in df.values:
-        joined = " ".join(row)
-        m = re.search(r"Lam(?:inate)?\s*KLD\s*for\s*(.+)", joined, re.IGNORECASE)
-        if m:
-            job_name = m.group(1).strip()
-            break
+    # --- 2. Job name (use all header lines) ---
+    job_name = full_header_text if full_header_text else "Unknown"
 
     # --- 3. Dimensions ---
     width_mm = cut_length_mm = 0
@@ -80,7 +77,7 @@ def extract_kld_data(df):
                 width_mm, cut_length_mm = map(int, nums[:2])
                 break
 
-    # --- 4. Pack note ---
+    # --- 4. Pack note (e.g., biscuits info) ---
     pack_note = ""
     for row in df.values:
         joined = " ".join(row)
@@ -88,16 +85,14 @@ def extract_kld_data(df):
             pack_note = joined.strip()
             break
 
-    # --- 5. Print Area ---
-    print_areas = []
+    # --- 5. Print Area (store in finarea column) ---
+    finarea = ""
     for row in df.values:
         joined = " ".join(row)
-        matches = re.findall(r"Print\s*Area[^,;]*", joined, re.IGNORECASE)
-        for m in matches:
-            clean = re.sub(r"\s+", " ", m.strip())
-            if clean not in print_areas:
-                print_areas.append(clean)
-    print_area_str = ", ".join(print_areas)
+        m = re.search(r"Print\s*Area[^,;]*", joined, re.IGNORECASE)
+        if m:
+            finarea = re.sub(r"\s+", " ", m.group(0).strip())
+            break
 
     # --- 6. Photocell detection ---
     photocell_w, photocell_h = 6, 12  # defaults
@@ -116,7 +111,7 @@ def extract_kld_data(df):
                 photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 7. Top sequence detection (row closest to cut_length) ---
+    # --- 7. Top sequence detection (row closest to cut length) ---
     top_seq_nums, best_diff = [], float("inf")
     for i in range(len(df)):
         nums = clean_numeric_list(df.iloc[i].tolist())
@@ -134,12 +129,12 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, side_seq_nums = diff, nums
 
-    # --- 9. Trim using correct physical mapping (±1 mm tolerance) ---
+    # --- 9. Trim to match physical KLD area (±1 mm tolerance) ---
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm, tol=1.0)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm, tol=1.0)
 
     if show_debug:
-        st.write(f"Header rows skipped: {start_row}")
+        st.write(f"Header lines: {header_lines}")
         st.write(f"Top seq raw sum = {sum(top_seq_nums):.1f}, target (cut length) = {cut_length_mm}")
         st.write(f"Trimmed top seq sum = {sum(top_seq_trimmed):.1f}")
         st.write(f"Side seq raw sum = {sum(side_seq_nums):.1f}, target (width) = {width_mm}")
@@ -155,11 +150,10 @@ def extract_kld_data(df):
         top_seq,
         side_seq,
         pack_note,
-        print_area_str,
+        finarea,
         photocell_w,
         photocell_h,
     )
-
 
 # ---------------------------------------------------
 # Streamlit App Main Flow
@@ -187,7 +181,7 @@ if uploaded_file:
             top_seq,
             side_seq,
             pack_note,
-            print_area_str,
+            finarea,
             photocell_w,
             photocell_h,
         ) = extract_kld_data(df)
@@ -199,7 +193,7 @@ if uploaded_file:
             "top_seq": top_seq,
             "side_seq": side_seq,
             "pack_note": pack_note,
-            "print_area": print_area_str,
+            "finarea": finarea,
             "photocell_w": photocell_w,
             "photocell_h": photocell_h,
             "photocell_offset_right_mm": 12,
@@ -208,8 +202,8 @@ if uploaded_file:
         }])
 
         csv_bytes = output_df.to_csv(index=False).encode("utf-8")
-        st.success(f"✅ Processed successfully for **{job_name}**")
-        st.download_button("⬇️ Download CSV File", csv_bytes, f"{job_name}_converted.csv", "text/csv")
+        st.success(f"✅ Processed successfully for **{job_name.split('/')[0]}**")
+        st.download_button("⬇️ Download CSV File", csv_bytes, f"{job_name.split('/')[0].strip()}_converted.csv", "text/csv")
         st.dataframe(output_df)
 
     except Exception as e:
