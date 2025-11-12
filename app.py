@@ -128,8 +128,8 @@ def make_svg(data):
 
     # Style / offsets per your requirements
     dieline = "#7f00bf"
-    stroke_pt = 0.4           # 0.4 pt outline thickness (as requested)
-    font_pt = 8               # 8 pt font (universal)
+    stroke_pt = 0.28           # 0.4 pt outline thickness (as requested)
+    font_pt = 2.8               # 8 pt font (universal)
     tick_short = 2.0          # tick length in mm (as before)
     top_shift_up = 4.0        # move top ticks/text up by 4 mm
     left_shift_left = 4.0     # move left ticks/text left by 4 mm
