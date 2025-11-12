@@ -206,11 +206,19 @@ def make_svg(data):
         x += v
         out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style=""/>')
 
+    # Optional centered dashed fold lines across main panel only
+
+
     y = 0
     max_top = max(top_seq) if top_seq else W
+    x_offset = (W - max_top) / 2  # center main panel horizontally
+
     for v in side_seq[:-1]:
         y += v
-    out.append(f'<line x1="0" y1="{y}" x2="{max_top}" y2="{y}" class="dieline"/>')
+        x1 = x_offset
+        x2 = x_offset + max_top
+        out.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" class="dieline" style="stroke-dasharray:1,1"/>')
+
 
 
     # Measurements
