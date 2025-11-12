@@ -1,15 +1,16 @@
 import streamlit as st
 import pandas as pd
 import re
-from io import BytesIO
 import numpy as np
+from io import BytesIO
 
 # ---------------------------------------------------
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Auto Trim by Dimension Sum ±1 mm)")
-st.caption("Detects job name, dimensions, sequences, and trims edges so total length matches KLD width/height (±1 mm).")
+st.title("📏 KLD Excel → CSV Converter (Final Calibrated Version)")
+st.caption("Auto-detects KLD dimensions, trims by physical size (±1 mm), "
+           "and extracts print/photocell info with correct width/length mapping.")
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 show_debug = st.checkbox("Show debug info", value=False)
@@ -33,10 +34,10 @@ def clean_numeric_list(seq):
     return out
 
 def auto_trim_to_target(values, target, tol=1.0):
-    """Trim from the end until sum <= target + tol."""
+    """Trim from end until total ≤ target + tol."""
     vals = values.copy()
     while sum(vals) > target + tol and len(vals) > 1:
-        vals.pop()  # remove last segment (right or bottom)
+        vals.pop()
     return vals
 
 # ---------------------------------------------------
@@ -83,7 +84,7 @@ def extract_kld_data(df):
                 print_areas.append(clean)
     print_area_str = ", ".join(print_areas)
 
-    # --- 5. Photocell ---
+    # --- 5. Photocell detection ---
     photocell_w, photocell_h = 6, 12  # defaults
     for row in df.values:
         joined = " ".join(row)
@@ -100,34 +101,32 @@ def extract_kld_data(df):
                 photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 6. Top sequence ---
-    top_seq_nums = []
-    max_count = 0
+    # --- 6. Top sequence detection (closest to cut length) ---
+    top_seq_nums, best_diff = [], float("inf")
     for i in range(len(df)):
-        row = df.iloc[i].tolist()
-        nums = clean_numeric_list(row)
-        if len(nums) > max_count and len(nums) >= 5:
-            max_count = len(nums)
-            top_seq_nums = nums
+        nums = clean_numeric_list(df.iloc[i].tolist())
+        if len(nums) >= 5:
+            diff = abs(sum(nums) - cut_length_mm)
+            if diff < best_diff:
+                best_diff, top_seq_nums = diff, nums
 
-    # --- 7. Side sequence ---
-    side_seq_nums = []
-    max_col = 0
+    # --- 7. Side sequence detection (closest to width) ---
+    side_seq_nums, best_diff = [], float("inf")
     for c in df.columns:
-        col = df[c].tolist()
-        nums = clean_numeric_list(col)
-        if len(nums) > max_col and len(nums) >= 3:
-            max_col = len(nums)
-            side_seq_nums = nums
+        nums = clean_numeric_list(df[c].tolist())
+        if len(nums) >= 3:
+            diff = abs(sum(nums) - width_mm)
+            if diff < best_diff:
+                best_diff, side_seq_nums = diff, nums
 
-    # --- 8. Trim sequences to match width/height within ±1 mm ---
-    top_seq_trimmed = auto_trim_to_target(top_seq_nums, width_mm, tol=1.0)
-    side_seq_trimmed = auto_trim_to_target(side_seq_nums, cut_length_mm, tol=1.0)
+    # --- 8. Trim using correct physical mapping (±1 mm tolerance) ---
+    top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm, tol=1.0)
+    side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm, tol=1.0)
 
     if show_debug:
-        st.write(f"Top seq raw sum = {sum(top_seq_nums):.1f}, target = {width_mm}")
+        st.write(f"Top seq raw sum = {sum(top_seq_nums):.1f}, target (cut length) = {cut_length_mm}")
         st.write(f"Trimmed top seq sum = {sum(top_seq_trimmed):.1f}")
-        st.write(f"Side seq raw sum = {sum(side_seq_nums):.1f}, target = {cut_length_mm}")
+        st.write(f"Side seq raw sum = {sum(side_seq_nums):.1f}, target (width) = {width_mm}")
         st.write(f"Trimmed side seq sum = {sum(side_seq_trimmed):.1f}")
 
     top_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed])
