@@ -94,6 +94,7 @@ def extract_kld_data(df):
 # SVG Generator (final layout - Illustrator-equivalent)
 # --------------------------------------------------------------------
 def make_svg(data):
+    import html
     def parse_seq(src):
         if src is None:
             return []
@@ -126,17 +127,17 @@ def make_svg(data):
     brand_label = str(data.get("brand_label") or "BRANDING")
     dieline = "#7f00bf"
 
-    pad_top_shift_mm = 20
-    tick_low, tick_high = 1.0, 6.0
-    tick_shift_top, tick_shift_left = 2.0, 2.0
+    # tick / text sizes (mm)
+    tick_short = 2.0            # measurement tick length required by you (2 mm)
+    tick_shift_top = 2.0        # offset outward for top ticks
+    tick_shift_left = 2.0       # offset outward for left ticks
     crop_off, crop_len = 2.0, 4.0
     text_small, text_med, text_title = 3.0, 4.0, 5.0
 
-    job_esc = html.escape(job)
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
     out.append('<defs>')
-    out.append(f'<style type="text/css"><![CDATA[')
+    out.append('<style type="text/css"><![CDATA[')
     out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_mm}mm;fill:none;}}')
     out.append(f'.dashed{{stroke:{dieline};stroke-width:{stroke_mm/2}mm;stroke-dasharray:1,1;fill:none;}}')
     out.append(f'.text{{font-family:Arial;fill:{dieline};}}')
@@ -145,17 +146,30 @@ def make_svg(data):
     # Main outline
     out.append(f'<g id="MainOutline"><rect x="0" y="0" width="{W}" height="{H}" class="dieline"/></g>')
 
-    # Vertical folds
-    x = 0
-    for v in top_seq[:-1]:
+    # Vertical dashed folds (full height)
+    x = 0.0
+    for i, v in enumerate(top_seq[:-1]):
         x += v
         out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dashed"/>')
 
-    # Horizontal folds
-    y = 0
-    for v in side_seq[:-1]:
+    # Horizontal dashed folds (full width)
+    y = 0.0
+    for i, v in enumerate(side_seq[:-1]):
         y += v
         out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dashed"/>')
+
+    # Draw panel rects (same as before)
+    xs = [0.0]; s = 0.0
+    for v in top_seq:
+        s += v; xs.append(s)
+    ys = [0.0]; s2 = 0.0
+    for v in side_seq:
+        s2 += v; ys.append(s2)
+    for r in range(len(side_seq)):
+        y0 = ys[r]; y1 = ys[r+1]
+        for c in range(len(top_seq)):
+            x0 = xs[c]; x1 = xs[c+1]
+            out.append(f'<rect x="{x0}" y="{y0}" width="{x1-x0}" height="{y1-y0}" class="dieline" />')
 
     # Photocell
     pcx = W - pc_off - pcw
@@ -166,47 +180,72 @@ def make_svg(data):
 
     # Crop marks
     out.append('<g id="CropMarks">')
-    # TL
     out.append(f'<line x1="{-crop_off}" y1="0" x2="{-crop_off-crop_len}" y2="0" class="dieline"/>')
     out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off-crop_len}" class="dieline"/>')
-    # TR
     out.append(f'<line x1="{W+crop_off}" y1="0" x2="{W+crop_off+crop_len}" y2="0" class="dieline"/>')
     out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off-crop_len}" class="dieline"/>')
-    # BL
     out.append(f'<line x1="{-crop_off}" y1="{H}" x2="{-crop_off-crop_len}" y2="{H}" class="dieline"/>')
     out.append(f'<line x1="0" y1="{H+crop_off}" x2="0" y2="{H+crop_off+crop_len}" class="dieline"/>')
-    # BR
     out.append(f'<line x1="{W+crop_off}" y1="{H}" x2="{W+crop_off+crop_len}" y2="{H}" class="dieline"/>')
     out.append(f'<line x1="{W}" y1="{H+crop_off}" x2="{W}" y2="{H+crop_off+crop_len}" class="dieline"/>')
     out.append('</g>')
 
-    # Text labels
+    # Labels and measurement ticks
     out.append('<g id="Labels">')
-    title_y = - (pad_top_shift_mm - 8)
+
+    # Title/subtitle (unchanged)
+    title_y = - (20 - 8)
     subtitle_y = title_y + 6
     out.append(f'<text x="{W/2}" y="{title_y}" text-anchor="middle" class="text" style="font-size:{text_title}mm;font-weight:bold;">{html.escape("LAM KLD for " + job)}</text>')
     out.append(f'<text x="{W/2}" y="{subtitle_y}" text-anchor="middle" class="text" style="font-size:{text_med}mm;">Dimensions ( Width * Cut off length ) {round(H)} * {round(W)} (in mm)</text>')
 
-    # END SEAL labels
+    # TOP measurement ticks and labels:
+    # We'll place small ticks of length tick_short above the top edge, offset by tick_shift_top,
+    # and numeric labels centered above each panel.
+    x = 0.0
+    top_label_y = 0 - tick_shift_top - tick_short - 1.0  # 1mm gap above tick
+    # leftmost tick at x=0
+    out.append(f'<line x1="{0}" y1="{0 - tick_shift_top}" x2="{0}" y2="{0 - tick_shift_top - tick_short}" class="dieline"/>')
+    # optionally label leftmost (usually not necessary), skip
+    for v in top_seq:
+        # right edge tick for this panel
+        x += v
+        out.append(f'<line x1="{x}" y1="{0 - tick_shift_top}" x2="{x}" y2="{0 - tick_shift_top - tick_short}" class="dieline"/>')
+        # panel mid-label
+        panel_mid = x - v/2.0
+        out.append(f'<text x="{panel_mid}" y="{top_label_y}" text-anchor="middle" class="text" style="font-size:{text_small}mm;">{int(round(v))}</text>')
+
+    # LEFT measurement ticks and labels:
+    y = 0.0
+    left_label_x = 0 - tick_shift_left - tick_short - 2.5  # left of ticks, give some gap
+    # topmost left tick at y=0
+    out.append(f'<line x1="{0 - tick_shift_left}" y1="{0}" x2="{0 - tick_shift_left - tick_short}" y2="{0}" class="dieline"/>')
+    for v in side_seq:
+        y += v
+        out.append(f'<line x1="{0 - tick_shift_left}" y1="{y}" x2="{0 - tick_shift_left - tick_short}" y2="{y}" class="dieline"/>')
+        # label centered alongside this side panel (rotate -90 to match AI layout)
+        midY = y - v/2.0
+        out.append(f'<text x="{left_label_x}" y="{midY}" transform="rotate(-90 {left_label_x} {midY})" text-anchor="middle" class="text" style="font-size:{text_small}mm;">{int(round(v))}</text>')
+
+    # END SEAL labels (unchanged)
     if top_seq:
         max_val = max(top_seq)
         max_idx = top_seq.index(max_val)
         sum_before = sum(top_seq[:max_idx])
         sum_after = sum(top_seq[max_idx+1:]) if max_idx+1 < len(top_seq) else 0
-        left_cx = sum_before/2 if sum_before > 0 else top_seq[0]/2
-        right_cx = sum_before + max_val + (sum_after/2 if sum_after>0 else top_seq[-1]/2)
         midy = H/2
         out.append(f'<text x="{-18}" y="{midy}" transform="rotate(-90 {-18} {midy})" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">END SEAL</text>')
         out.append(f'<text x="{W+18}" y="{midy}" transform="rotate(-90 {W+18} {midy})" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">END SEAL</text>')
 
-    # Centre seals top/bottom
+    # Centre seal labels and branding (unchanged)
     out.append(f'<text x="{W/2}" y="{5}" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">CENTRE SEAL AREA</text>')
     out.append(f'<text x="{W/2}" y="{H-2}" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">CENTRE SEAL AREA</text>')
-    # Branding
     out.append(f'<text x="{W/2}" y="{H/2}" text-anchor="middle" class="text" style="font-size:{text_med*1.2}mm;font-weight:bold;">{html.escape(brand_label)}</text>')
-    out.append('</g>')
+
+    out.append('</g>')  # Labels
     out.append('</svg>')
     return "\n".join(out)
+
 
 # --------------------------------------------------------------------
 # Streamlit UI
