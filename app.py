@@ -2,12 +2,15 @@ import streamlit as st
 import pandas as pd
 import re
 import io
+import html
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Combined)")
-st.caption("Upload Excel → extract KLD → download SVG (AI-editable, mm units, DIELINE colour, Arial font).")
+st.title("📏 KLD Excel → SVG Generator (Final Layout)")
+st.caption("Upload Excel → Extract KLD → Download SVG (AI-editable, mm units, DIELINE colour, Arial font)")
 
-# === helper functions (same as your original) ==================================
+# --------------------------------------------------------------------
+# Helper functions
+# --------------------------------------------------------------------
 def clean_numeric_list(seq):
     out = []
     for v in seq:
@@ -28,28 +31,6 @@ def first_pair_from_text(text):
     if m:
         return int(float(m.group(1))), int(float(m.group(2)))
     return 0, 0
-
-def auto_trim_to_target(values, target, tol=1.0):
-    vals = values.copy()
-    while len(vals) > 1 and target > 0 and sum(vals) > target + tol:
-        vals.pop()
-    return vals
-
-def extract_print_areas(lines):
-    finarea_left = finarea_right = printarea = ""
-    for ln in lines:
-        if re.search(r"print\s*area", ln, re.IGNORECASE):
-            pairs = re.findall(r"(\d+)\s*[*xX]\s*(\d+)", ln)
-            if len(pairs) == 1:
-                finarea_left = f"{pairs[0][0]}x{pairs[0][1]} mm"
-            elif len(pairs) >= 2:
-                finarea_left = f"{pairs[0][0]}x{pairs[0][1]} mm"
-                finarea_right = f"{pairs[1][0]}x{pairs[1][1]} mm"
-        if re.search(r"printing\s*area", ln, re.IGNORECASE):
-            w, h = first_pair_from_text(ln)
-            if w and h:
-                printarea = f"{w}x{h} mm"
-    return finarea_left, finarea_right, printarea
 
 def extract_dimensions(lines):
     for ln in lines:
@@ -79,24 +60,6 @@ def extract_kld_data(df):
         for i in range(max(0, start_row - 10), min(len(df), start_row + 80))
     ]
     width_mm, cut_length_mm = extract_dimensions(search_lines)
-    finarea_left, finarea_right, printarea = extract_print_areas(search_lines)
-
-    photocell_w, photocell_h = 6, 12
-    for ln in search_lines:
-        if re.search(r"photo|mark", ln, re.IGNORECASE):
-            nums = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", ln)]
-            nums = [n for n in nums if 2 <= n <= 50]
-            if len(nums) >= 2:
-                nums.sort()
-                photocell_w, photocell_h = nums[0], nums[1]
-                break
-
-    pack_note = ""
-    for ln in search_lines:
-        if re.search(r"biscuits\s+on\s+edge", ln, re.IGNORECASE):
-            pack_note = ln.strip()
-            break
-
     df_num = df.iloc[start_row:].reset_index(drop=True)
     top_seq_nums, side_seq_nums = [], []
     best_diff = float("inf")
@@ -114,81 +77,146 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, side_seq_nums = diff, nums
 
-    top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
-    side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
-
-    top_seq = ",".join(str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed)
-    side_seq = ",".join(str(int(v)) if v.is_integer() else str(v) for v in side_seq_trimmed)
-
     return {
         "job_name": job_name,
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
-        "top_seq": top_seq,
-        "side_seq": side_seq,
-        "finarea_left": finarea_left,
-        "finarea_right": finarea_right,
-        "printarea": printarea,
-        "pack_note": pack_note,
-        "photocell_w": photocell_w,
-        "photocell_h": photocell_h,
+        "top_seq": top_seq_nums,
+        "side_seq": side_seq_nums,
+        "photocell_w": 6,
+        "photocell_h": 12,
         "photocell_offset_right_mm": 12,
         "stroke_mm": 0.25,
         "brand_label": "BRANDING",
     }
 
-# === SVG builder ==============================================================
+# --------------------------------------------------------------------
+# SVG Generator (final layout - Illustrator-equivalent)
+# --------------------------------------------------------------------
 def make_svg(data):
-    W = data["cut_length_mm"]
-    H = data["width_mm"]
-    top_seq = [float(x) for x in data["top_seq"].split(",") if x]
-    side_seq = [float(x) for x in data["side_seq"].split(",") if x]
-    dieline = "#7f00bf"
-    stroke = data["stroke_mm"]
-    pcw, pch = data["photocell_w"], data["photocell_h"]
-    pc_off = data["photocell_offset_right_mm"]
-    job = data["job_name"].replace("\n", " | ")
+    def parse_seq(src):
+        if src is None:
+            return []
+        if isinstance(src, (list, tuple)):
+            return [float(x) for x in src if x is not None and str(x) != ""]
+        s = str(src)
+        s = s.strip().replace(";", ",").replace("|", ",")
+        parts = [p.strip() for p in s.split(",") if p.strip()]
+        out = []
+        for p in parts:
+            try:
+                out.append(float(p))
+            except:
+                for q in p.split():
+                    try:
+                        out.append(float(q))
+                    except:
+                        pass
+        return out
 
-    # SVG header (mm units)
+    W = float(data.get("cut_length_mm") or 0)
+    H = float(data.get("width_mm") or 0)
+    top_seq = parse_seq(data.get("top_seq"))
+    side_seq = parse_seq(data.get("side_seq"))
+    stroke_mm = float(data.get("stroke_mm") or 0.25)
+    pcw = float(data.get("photocell_w") or 6)
+    pch = float(data.get("photocell_h") or 12)
+    pc_off = float(data.get("photocell_offset_right_mm") or 12)
+    job = str(data.get("job_name") or "Job").replace("\n", " | ")
+    brand_label = str(data.get("brand_label") or "BRANDING")
+    dieline = "#7f00bf"
+
+    pad_top_shift_mm = 20
+    tick_low, tick_high = 1.0, 6.0
+    tick_shift_top, tick_shift_left = 2.0, 2.0
+    crop_off, crop_len = 2.0, 4.0
+    text_small, text_med, text_title = 3.0, 4.0, 5.0
+
+    job_esc = html.escape(job)
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
-    out.append(f'<style>text{{font-family:Arial;font-size:3.5mm;fill:{dieline};}} .dl{{stroke:{dieline};stroke-width:{stroke}mm;fill:none;}}</style>')
-    out.append(f'<g id="MainOutline"><rect x="0" y="0" width="{W}" height="{H}" class="dl"/></g>')
+    out.append('<defs>')
+    out.append(f'<style type="text/css"><![CDATA[')
+    out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_mm}mm;fill:none;}}')
+    out.append(f'.dashed{{stroke:{dieline};stroke-width:{stroke_mm/2}mm;stroke-dasharray:1,1;fill:none;}}')
+    out.append(f'.text{{font-family:Arial;fill:{dieline};}}')
+    out.append(']]></style></defs>')
 
-    # vertical fold lines (top_seq)
+    # Main outline
+    out.append(f'<g id="MainOutline"><rect x="0" y="0" width="{W}" height="{H}" class="dieline"/></g>')
+
+    # Vertical folds
     x = 0
     for v in top_seq[:-1]:
         x += v
-        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dl" stroke-dasharray="1,1"/>')
+        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dashed"/>')
 
-    # horizontal fold lines (side_seq)
+    # Horizontal folds
     y = 0
     for v in side_seq[:-1]:
         y += v
-        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dl" stroke-dasharray="1,1"/>')
+        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dashed"/>')
 
-    # Photocell mark (right side)
+    # Photocell
     pcx = W - pc_off - pcw
-    pcy = H / 2 - pch / 2
-    out.append(f'<rect x="{pcx}" y="{pcy}" width="{pcw}" height="{pch}" class="dl"/>')
+    pcy = H/2 - pch/2
+    out.append(f'<rect x="{pcx}" y="{pcy}" width="{pcw}" height="{pch}" class="dieline"/>')
+    out.append(f'<line x1="{pcx+pcw}" y1="{pcy}" x2="{pcx+pcw+3}" y2="{pcy+3}" class="dieline"/>')
+    out.append(f'<line x1="{pcx+pcw}" y1="{pcy+pch}" x2="{pcx+pcw+3}" y2="{pcy+pch-3}" class="dieline"/>')
 
-    # Labels
-    out.append(f'<g id="Labels">')
-    out.append(f'<text x="{W/2}" y="{-5}" text-anchor="middle">{job}</text>')
-    out.append(f'<text x="{W/2}" y="{H+5}" text-anchor="middle">{round(H)}×{round(W)} mm</text>')
-    out.append(f'</g>')
+    # Crop marks
+    out.append('<g id="CropMarks">')
+    # TL
+    out.append(f'<line x1="{-crop_off}" y1="0" x2="{-crop_off-crop_len}" y2="0" class="dieline"/>')
+    out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off-crop_len}" class="dieline"/>')
+    # TR
+    out.append(f'<line x1="{W+crop_off}" y1="0" x2="{W+crop_off+crop_len}" y2="0" class="dieline"/>')
+    out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off-crop_len}" class="dieline"/>')
+    # BL
+    out.append(f'<line x1="{-crop_off}" y1="{H}" x2="{-crop_off-crop_len}" y2="{H}" class="dieline"/>')
+    out.append(f'<line x1="0" y1="{H+crop_off}" x2="0" y2="{H+crop_off+crop_len}" class="dieline"/>')
+    # BR
+    out.append(f'<line x1="{W+crop_off}" y1="{H}" x2="{W+crop_off+crop_len}" y2="{H}" class="dieline"/>')
+    out.append(f'<line x1="{W}" y1="{H+crop_off}" x2="{W}" y2="{H+crop_off+crop_len}" class="dieline"/>')
+    out.append('</g>')
 
+    # Text labels
+    out.append('<g id="Labels">')
+    title_y = - (pad_top_shift_mm - 8)
+    subtitle_y = title_y + 6
+    out.append(f'<text x="{W/2}" y="{title_y}" text-anchor="middle" class="text" style="font-size:{text_title}mm;font-weight:bold;">{html.escape("LAM KLD for " + job)}</text>')
+    out.append(f'<text x="{W/2}" y="{subtitle_y}" text-anchor="middle" class="text" style="font-size:{text_med}mm;">Dimensions ( Width * Cut off length ) {round(H)} * {round(W)} (in mm)</text>')
+
+    # END SEAL labels
+    if top_seq:
+        max_val = max(top_seq)
+        max_idx = top_seq.index(max_val)
+        sum_before = sum(top_seq[:max_idx])
+        sum_after = sum(top_seq[max_idx+1:]) if max_idx+1 < len(top_seq) else 0
+        left_cx = sum_before/2 if sum_before > 0 else top_seq[0]/2
+        right_cx = sum_before + max_val + (sum_after/2 if sum_after>0 else top_seq[-1]/2)
+        midy = H/2
+        out.append(f'<text x="{-18}" y="{midy}" transform="rotate(-90 {-18} {midy})" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">END SEAL</text>')
+        out.append(f'<text x="{W+18}" y="{midy}" transform="rotate(-90 {W+18} {midy})" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">END SEAL</text>')
+
+    # Centre seals top/bottom
+    out.append(f'<text x="{W/2}" y="{5}" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">CENTRE SEAL AREA</text>')
+    out.append(f'<text x="{W/2}" y="{H-2}" text-anchor="middle" class="text" style="font-size:{text_med}mm;font-weight:bold;">CENTRE SEAL AREA</text>')
+    # Branding
+    out.append(f'<text x="{W/2}" y="{H/2}" text-anchor="middle" class="text" style="font-size:{text_med*1.2}mm;font-weight:bold;">{html.escape(brand_label)}</text>')
+    out.append('</g>')
     out.append('</svg>')
     return "\n".join(out)
 
-# === main streamlit logic =====================================================
+# --------------------------------------------------------------------
+# Streamlit UI
+# --------------------------------------------------------------------
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
 if uploaded_file:
     ext = uploaded_file.name.split(".")[-1].lower()
     data = uploaded_file.read()
     uploaded_file.seek(0)
-
     if ext == "xls":
         import xlrd
         df = pd.read_excel(io.BytesIO(data), header=None, engine="xlrd")
@@ -208,7 +236,6 @@ if uploaded_file:
             "kld_layout.svg",
             "image/svg+xml"
         )
-
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
 else:
