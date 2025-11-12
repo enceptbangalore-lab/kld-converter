@@ -8,10 +8,10 @@ import io
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Multi-line header + finarea fix)")
+st.title("📏 KLD Excel → CSV Converter (Final Stable Build)")
 st.caption(
-    "Reads KLD Excel (.xls/.xlsx), keeps headers as multi-line job_name, "
-    "extracts Print Area to finarea, trims within ±1 mm."
+    "Reads KLD Excel (.xls/.xlsx), extracts multi-line headers into job_name, "
+    "moves Print Area to finarea, trims sequences (±1 mm)."
 )
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
@@ -19,7 +19,7 @@ show_debug = st.checkbox("Show debug info", value=False)
 
 
 # ---------------------------------------------------
-# Helpers
+# Helper functions
 # ---------------------------------------------------
 def is_number(x):
     try:
@@ -30,6 +30,7 @@ def is_number(x):
 
 
 def clean_numeric_list(seq):
+    """Return only numeric values from a list."""
     out = []
     for v in seq:
         if is_number(v):
@@ -39,7 +40,7 @@ def clean_numeric_list(seq):
 
 
 def auto_trim_to_target(values, target, tol=1.0):
-    """Trim from end until total ≤ target + tol."""
+    """Trim values from the end until the total sum ≤ target + tolerance."""
     vals = values.copy()
     while sum(vals) > target + tol and len(vals) > 1:
         vals.pop()
@@ -52,36 +53,37 @@ def auto_trim_to_target(values, target, tol=1.0):
 def extract_kld_data(df):
     df = df.fillna("").astype(str)
 
-    # --- 1. Collect all header lines before numeric content ---
+    # --- 1. Detect header section properly ---
     header_lines = []
     start_row = 0
     finarea = ""
 
-    for i in range(min(15, len(df))):
+    for i in range(min(20, len(df))):
         row = df.iloc[i].tolist()
         line_text = " ".join([str(x).strip() for x in row if str(x).strip() != ""])
 
-        # Capture Print Area separately
-        if re.search(r"Print\s*Area", line_text, re.IGNORECASE):
-            finarea = line_text.strip()
-            continue
-
-        if line_text:
-            header_lines.append(line_text)
-
+        # Detect the first numeric data line
         numeric_count = len(clean_numeric_list(row))
-        # assume numeric data row when we find 3+ numbers
         if numeric_count >= 3:
             start_row = i
             break
 
-    # Join header lines as multi-line string
+        # Capture "Print Area" separately
+        if re.search(r"Print\s*Area", line_text, re.IGNORECASE):
+            finarea = line_text.strip()
+            continue
+
+        # Capture valid header lines
+        if line_text:
+            header_lines.append(line_text)
+
+    # Combine headers as multi-line text
     job_name = "\n".join(header_lines) if header_lines else "Unknown"
 
-    # Slice data below header section
+    # --- 2. Slice dataframe to exclude header block ---
     df = df.iloc[start_row:].reset_index(drop=True)
 
-    # --- 2. Dimensions (width & cut length) ---
+    # --- 3. Dimensions (width & cut length) ---
     width_mm = cut_length_mm = 0
     for row in df.values:
         joined = " ".join(row)
@@ -91,7 +93,7 @@ def extract_kld_data(df):
                 width_mm, cut_length_mm = map(int, nums[:2])
                 break
 
-    # --- 3. Pack note (e.g., biscuits info) ---
+    # --- 4. Pack note (e.g., biscuits info) ---
     pack_note = ""
     for row in df.values:
         joined = " ".join(row)
@@ -99,7 +101,7 @@ def extract_kld_data(df):
             pack_note = joined.strip()
             break
 
-    # --- 4. Photocell detection ---
+    # --- 5. Photocell detection ---
     photocell_w, photocell_h = 6, 12  # defaults
     for row in df.values:
         joined = " ".join(row)
@@ -116,7 +118,7 @@ def extract_kld_data(df):
                 photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 5. Top sequence (closest to cut length) ---
+    # --- 6. Top sequence (closest to cut length) ---
     top_seq_nums, best_diff = [], float("inf")
     for i in range(len(df)):
         nums = clean_numeric_list(df.iloc[i].tolist())
@@ -125,7 +127,7 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, top_seq_nums = diff, nums
 
-    # --- 6. Side sequence (closest to width) ---
+    # --- 7. Side sequence (closest to width) ---
     side_seq_nums, best_diff = [], float("inf")
     for c in df.columns:
         nums = clean_numeric_list(df[c].tolist())
@@ -134,7 +136,7 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, side_seq_nums = diff, nums
 
-    # --- 7. Trim to match KLD area ---
+    # --- 8. Trim to match KLD area ---
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm, tol=1.0)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm, tol=1.0)
 
