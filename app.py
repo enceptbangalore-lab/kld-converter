@@ -2,16 +2,17 @@ import streamlit as st
 import pandas as pd
 import re
 from io import BytesIO
+import numpy as np
 
 # ---------------------------------------------------
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Refined with Area Detection)")
-st.caption("Automatically detects job name, dimensions, valid KLD area, and photocell (filters irrelevant values).")
+st.title("📏 KLD Excel → CSV Converter (Auto Trim by Dimension Sum ±1 mm)")
+st.caption("Detects job name, dimensions, sequences, and trims edges so total length matches KLD width/height (±1 mm).")
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
-
+show_debug = st.checkbox("Show debug info", value=False)
 
 # ---------------------------------------------------
 # Helpers
@@ -23,7 +24,6 @@ def is_number(x):
     except:
         return False
 
-
 def clean_numeric_list(seq):
     out = []
     for v in seq:
@@ -32,6 +32,12 @@ def clean_numeric_list(seq):
             out.append(f)
     return out
 
+def auto_trim_to_target(values, target, tol=1.0):
+    """Trim from the end until sum <= target + tol."""
+    vals = values.copy()
+    while sum(vals) > target + tol and len(vals) > 1:
+        vals.pop()  # remove last segment (right or bottom)
+    return vals
 
 # ---------------------------------------------------
 # Core Extraction Logic
@@ -77,14 +83,14 @@ def extract_kld_data(df):
                 print_areas.append(clean)
     print_area_str = ", ".join(print_areas)
 
-    # --- 5. Photocell (filter product lines, use only 'photo'/'mark' lines) ---
+    # --- 5. Photocell ---
     photocell_w, photocell_h = 6, 12  # defaults
     for row in df.values:
         joined = " ".join(row)
         upper = joined.upper()
         if ("PHOTO" in upper or "MARK" in upper) and not re.search(r"KLD|COUNT|G\b", upper):
             nums = [float(n) for n in re.findall(r"(\d+(?:\.\d+)?)", joined)]
-            nums = [n for n in nums if 2 <= n <= 50]  # valid mm range filter
+            nums = [n for n in nums if 2 <= n <= 50]
             if len(nums) >= 2:
                 nums = sorted(nums)
                 photocell_w, photocell_h = nums[0], nums[1]
@@ -94,8 +100,8 @@ def extract_kld_data(df):
                 photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 6. Top sequence (remove outside KLD area noise) ---
-    top_seq = ""
+    # --- 6. Top sequence ---
+    top_seq_nums = []
     max_count = 0
     for i in range(len(df)):
         row = df.iloc[i].tolist()
@@ -104,24 +110,28 @@ def extract_kld_data(df):
             max_count = len(nums)
             top_seq_nums = nums
 
-    # Filter out any trailing tiny segment (e.g., ≤15 mm or after huge jump)
-    if max_count > 0:
-        diffs = [abs(top_seq_nums[i+1] - top_seq_nums[i]) for i in range(len(top_seq_nums)-1)]
-        cutoff = len(top_seq_nums)
-        if top_seq_nums[-1] <= 15 or (len(diffs) > 0 and diffs[-1] > 100):
-            cutoff -= 1
-        top_seq_nums = top_seq_nums[:cutoff]
-        top_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in top_seq_nums])
-
     # --- 7. Side sequence ---
-    side_seq = ""
+    side_seq_nums = []
     max_col = 0
     for c in df.columns:
         col = df[c].tolist()
         nums = clean_numeric_list(col)
         if len(nums) > max_col and len(nums) >= 3:
             max_col = len(nums)
-            side_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in nums])
+            side_seq_nums = nums
+
+    # --- 8. Trim sequences to match width/height within ±1 mm ---
+    top_seq_trimmed = auto_trim_to_target(top_seq_nums, width_mm, tol=1.0)
+    side_seq_trimmed = auto_trim_to_target(side_seq_nums, cut_length_mm, tol=1.0)
+
+    if show_debug:
+        st.write(f"Top seq raw sum = {sum(top_seq_nums):.1f}, target = {width_mm}")
+        st.write(f"Trimmed top seq sum = {sum(top_seq_trimmed):.1f}")
+        st.write(f"Side seq raw sum = {sum(side_seq_nums):.1f}, target = {cut_length_mm}")
+        st.write(f"Trimmed side seq sum = {sum(side_seq_trimmed):.1f}")
+
+    top_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed])
+    side_seq = ",".join([str(int(v)) if v.is_integer() else str(v) for v in side_seq_trimmed])
 
     return (
         job_name,
@@ -134,7 +144,6 @@ def extract_kld_data(df):
         photocell_w,
         photocell_h,
     )
-
 
 # ---------------------------------------------------
 # Streamlit App Main Flow
@@ -155,7 +164,6 @@ if uploaded_file:
             photocell_h,
         ) = extract_kld_data(df)
 
-        # Build output dataframe
         output_df = pd.DataFrame([{
             "job_name": job_name,
             "width_mm": width_mm,
@@ -175,10 +183,6 @@ if uploaded_file:
         st.success(f"✅ Processed successfully for **{job_name}**")
         st.download_button("⬇️ Download CSV File", csv_bytes, f"{job_name}_converted.csv", "text/csv")
         st.dataframe(output_df)
-        st.caption(
-            f"Detected top_seq length: {len(top_seq.split(','))} | "
-            f"side_seq length: {len(side_seq.split(','))}"
-        )
 
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
