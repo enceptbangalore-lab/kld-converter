@@ -210,7 +210,7 @@ def make_svg(data):
     max_top = max(top_seq) if top_seq else W
     for v in side_seq[:-1]:
         y += v
-    out.append(f'<line x1="0" y1="{y}" x2="{max_top}" y2="{y}" class="dieline" style=""/>')
+    out.append(f'<line x1="0" y1="{y}" x2="{max_top}" y2="{y}" class="dieline"/>')
 
 
     # Measurements
