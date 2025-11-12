@@ -10,30 +10,45 @@ st.caption("Upload your Excel file and download the converted CSV in standard fo
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
 def extract_kld_data(df):
-    # Find job name
+    # --- 1. Job name ---
     job_name_row = df[df.apply(lambda x: x.astype(str).str.contains("Lam KLD for", case=False, na=False)).any(axis=1)].index[0]
     job_name = df.iloc[job_name_row].dropna().iloc[0].replace("Lam KLD for ", "").strip()
 
-    # Find dimensions
+    # --- 2. Dimensions ---
     dim_row = df[df.apply(lambda x: x.astype(str).str.contains("Dimension", case=False, na=False)).any(axis=1)].index[0]
     dim_text = df.iloc[dim_row].dropna().iloc[0]
     width_mm, cut_length_mm = map(int, re.findall(r"\d+", dim_text)[:2])
 
-    # Detect top sequence (row with most numeric values)
-    numeric_rows = df.applymap(lambda x: str(x).replace(".", "", 1).isdigit() if pd.notna(x) else False)
-    top_row = numeric_rows.sum(axis=1).idxmax()
-    top_seq_vals = [str(int(float(v))) if str(v).replace(".", "", 1).isdigit() else str(v)
-                    for v in df.iloc[top_row].dropna().tolist()]
+    # --- 3. Detect numeric-only cells ---
+    def is_number(x):
+        try:
+            float(x)
+            return True
+        except:
+            return False
+
+    numeric_mask = df.applymap(is_number)
+
+    # --- 4. Top sequence (row with most numeric values) ---
+    top_row = numeric_mask.sum(axis=1).idxmax()
+    top_seq_vals = [
+        str(int(float(v))) if str(v).replace(".", "", 1).isdigit() else str(v)
+        for v in df.iloc[top_row].dropna().tolist()
+        if is_number(v)
+    ]
     top_seq = ",".join(top_seq_vals)
 
-    # Detect side sequence (column with most numeric values)
-    numeric_cols = numeric_rows.sum(axis=0)
-    side_col = numeric_cols.idxmax()
-    side_seq_vals = [str(int(float(v))) if str(v).replace(".", "", 1).isdigit() else str(v)
-                     for v in df.iloc[:, side_col].dropna().tolist()]
+    # --- 5. Side sequence (column with most numeric values) ---
+    side_col = numeric_mask.sum(axis=0).idxmax()
+    side_seq_vals = [
+        str(int(float(v))) if str(v).replace(".", "", 1).isdigit() else str(v)
+        for v in df.iloc[:, side_col].dropna().tolist()
+        if is_number(v)
+    ]
     side_seq = ",".join(side_seq_vals)
 
     return job_name, width_mm, cut_length_mm, top_seq, side_seq
+
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
