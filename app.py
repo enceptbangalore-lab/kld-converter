@@ -204,12 +204,12 @@ def make_svg(data):
     x = 0
     for v in top_seq[:-1]:
         x += v
-        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style="stroke-dasharray:1,1"/>')
+        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style=""/>')
 
     y = 0
     for v in side_seq[:-1]:
         y += v
-        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dieline" style="stroke-dasharray:1,1"/>')
+        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dieline" style=""/>')
 
     # Measurements
     out.append('<g id="Measurements">')
