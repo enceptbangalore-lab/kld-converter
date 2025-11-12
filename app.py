@@ -2,15 +2,17 @@ import streamlit as st
 import pandas as pd
 import re
 import numpy as np
-from io import BytesIO
+import io
 
 # ---------------------------------------------------
 # Streamlit App Configuration
 # ---------------------------------------------------
 st.set_page_config(page_title="KLD Excel → CSV Converter", layout="wide")
-st.title("📏 KLD Excel → CSV Converter (Final Calibrated Version)")
-st.caption("Auto-detects KLD dimensions, trims by physical size (±1 mm), "
-           "and extracts print/photocell info with correct width/length mapping.")
+st.title("📏 KLD Excel → CSV Converter (Final Multi-Header + XLS/XLSX Version)")
+st.caption(
+    "Detects KLD dimensions, handles multi-line headers, trims by physical size (±1 mm), "
+    "and extracts print/photocell details."
+)
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 show_debug = st.checkbox("Show debug info", value=False)
@@ -25,6 +27,7 @@ def is_number(x):
     except:
         return False
 
+
 def clean_numeric_list(seq):
     out = []
     for v in seq:
@@ -33,6 +36,7 @@ def clean_numeric_list(seq):
             out.append(f)
     return out
 
+
 def auto_trim_to_target(values, target, tol=1.0):
     """Trim from end until total ≤ target + tol."""
     vals = values.copy()
@@ -40,13 +44,24 @@ def auto_trim_to_target(values, target, tol=1.0):
         vals.pop()
     return vals
 
+
 # ---------------------------------------------------
 # Core Extraction Logic
 # ---------------------------------------------------
 def extract_kld_data(df):
     df = df.fillna("").astype(str)
 
-    # --- 1. Job name ---
+    # --- 1. Detect header depth & skip it dynamically ---
+    start_row = 0
+    for i in range(min(10, len(df))):
+        row = df.iloc[i].tolist()
+        numeric_count = len(clean_numeric_list(row))
+        if numeric_count >= 3:
+            start_row = i
+            break
+    df = df.iloc[start_row:].reset_index(drop=True)
+
+    # --- 2. Job name ---
     job_name = "Unknown"
     for row in df.values:
         joined = " ".join(row)
@@ -55,7 +70,7 @@ def extract_kld_data(df):
             job_name = m.group(1).strip()
             break
 
-    # --- 2. Dimensions ---
+    # --- 3. Dimensions ---
     width_mm = cut_length_mm = 0
     for row in df.values:
         joined = " ".join(row)
@@ -65,7 +80,7 @@ def extract_kld_data(df):
                 width_mm, cut_length_mm = map(int, nums[:2])
                 break
 
-    # --- 3. Pack note ---
+    # --- 4. Pack note ---
     pack_note = ""
     for row in df.values:
         joined = " ".join(row)
@@ -73,7 +88,7 @@ def extract_kld_data(df):
             pack_note = joined.strip()
             break
 
-    # --- 4. Print Area ---
+    # --- 5. Print Area ---
     print_areas = []
     for row in df.values:
         joined = " ".join(row)
@@ -84,7 +99,7 @@ def extract_kld_data(df):
                 print_areas.append(clean)
     print_area_str = ", ".join(print_areas)
 
-    # --- 5. Photocell detection ---
+    # --- 6. Photocell detection ---
     photocell_w, photocell_h = 6, 12  # defaults
     for row in df.values:
         joined = " ".join(row)
@@ -101,7 +116,7 @@ def extract_kld_data(df):
                 photocell_h = max(12.0, photocell_w)
                 break
 
-    # --- 6. Top sequence detection (closest to cut length) ---
+    # --- 7. Top sequence detection (row closest to cut_length) ---
     top_seq_nums, best_diff = [], float("inf")
     for i in range(len(df)):
         nums = clean_numeric_list(df.iloc[i].tolist())
@@ -110,7 +125,7 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, top_seq_nums = diff, nums
 
-    # --- 7. Side sequence detection (closest to width) ---
+    # --- 8. Side sequence detection (column closest to width) ---
     side_seq_nums, best_diff = [], float("inf")
     for c in df.columns:
         nums = clean_numeric_list(df[c].tolist())
@@ -119,11 +134,12 @@ def extract_kld_data(df):
             if diff < best_diff:
                 best_diff, side_seq_nums = diff, nums
 
-    # --- 8. Trim using correct physical mapping (±1 mm tolerance) ---
+    # --- 9. Trim using correct physical mapping (±1 mm tolerance) ---
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm, tol=1.0)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm, tol=1.0)
 
     if show_debug:
+        st.write(f"Header rows skipped: {start_row}")
         st.write(f"Top seq raw sum = {sum(top_seq_nums):.1f}, target (cut length) = {cut_length_mm}")
         st.write(f"Trimmed top seq sum = {sum(top_seq_trimmed):.1f}")
         st.write(f"Side seq raw sum = {sum(side_seq_nums):.1f}, target (width) = {width_mm}")
@@ -144,11 +160,24 @@ def extract_kld_data(df):
         photocell_h,
     )
 
+
 # ---------------------------------------------------
 # Streamlit App Main Flow
 # ---------------------------------------------------
 if uploaded_file:
-    df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
+    # Smart Excel reader (handles both .xls and .xlsx)
+    file_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+    excel_ext = uploaded_file.name.split(".")[-1].lower()
+
+    try:
+        if excel_ext == "xls":
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, header=None, engine="xlrd")
+        else:
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, header=None, engine="openpyxl")
+    except Exception as e:
+        st.error(f"❌ Failed to read Excel file: {e}")
+        st.stop()
 
     try:
         (
