@@ -115,6 +115,7 @@ def make_svg(data):
                         pass
         return out
 
+    # Inputs
     W = float(data.get("cut_length_mm") or 0)
     H = float(data.get("width_mm") or 0)
     top_seq = parse_seq(data.get("top_seq"))
@@ -125,87 +126,131 @@ def make_svg(data):
     job = str(data.get("job_name") or "Job").replace("\n", " | ")
     brand_label = str(data.get("brand_label") or "BRANDING")
 
+    # Style / offsets per your requirements
     dieline = "#7f00bf"
-    stroke_pt = 0.4  # Outline thickness (pt)
-    font_pt = 8      # Font size (pt)
-    tick_short = 2.0 # Tick length in mm
-    crop_off, crop_len = 2.0, 4.0
+    stroke_pt = 0.4           # 0.4 pt outline thickness (as requested)
+    font_pt = 8               # 8 pt font (universal)
+    tick_short = 2.0          # tick length in mm (as before)
+    top_shift_up = 4.0        # move top ticks/text up by 4 mm
+    left_shift_left = 4.0     # move left ticks/text left by 4 mm
+    crop_off = 2.0
+    crop_len = 4.0
 
-    # measurement offsets
-    top_shift_up = 4.0
-    left_shift_left = 4.0
-
+    # Start SVG (mm units)
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
     out.append('<defs>')
     out.append('<style type="text/css"><![CDATA[')
     out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-    out.append(f'.text{{font-family:Arial;fill:{dieline};font-size:{font_pt}pt;}}')
+    out.append(f'.dashed{{stroke:{dieline};stroke-width:{stroke_pt}pt;stroke-dasharray:1,1;fill:none;}}')
+    out.append(f'.text{{font-family:Arial, Helvetica, sans-serif; font-size:{font_pt}pt; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Outer dieline box
+    # Outer dieline
     out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
 
-    # Dashed folds
-    x = 0
+    # Vertical dashed folds from top_seq
+    x = 0.0
     for v in top_seq[:-1]:
         x += v
-        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style="stroke-dasharray:1,1;"/>')
-    y = 0
+        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dashed"/>')
+
+    # Horizontal dashed folds from side_seq
+    y = 0.0
     for v in side_seq[:-1]:
         y += v
-        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dieline" style="stroke-dasharray:1,1;"/>')
+        out.append(f'<line x1="0" y1="{y}" x2="{W}" y2="{y}" class="dashed"/>')
 
-    # Photocell
+    # Panels (optional exact panel outlines)
+    xs = [0.0]; s = 0.0
+    for v in top_seq:
+        s += v; xs.append(s)
+    ys = [0.0]; s2 = 0.0
+    for v in side_seq:
+        s2 += v; ys.append(s2)
+    for r in range(len(side_seq)):
+        y0 = ys[r]; y1 = ys[r+1]
+        for c in range(len(top_seq)):
+            x0 = xs[c]; x1 = xs[c+1]
+            out.append(f'<rect x="{x0}" y="{y0}" width="{x1-x0}" height="{y1-y0}" class="dieline" />')
+
+    # Photocell (same placement logic)
     pcx = W - pc_off - pcw
-    pcy = H/2 - pch/2
+    pcy = H/2.0 - pch/2.0
     out.append(f'<rect x="{pcx}" y="{pcy}" width="{pcw}" height="{pch}" class="dieline"/>')
     out.append(f'<line x1="{pcx+pcw}" y1="{pcy}" x2="{pcx+pcw+3}" y2="{pcy+3}" class="dieline"/>')
     out.append(f'<line x1="{pcx+pcw}" y1="{pcy+pch}" x2="{pcx+pcw+3}" y2="{pcy+pch-3}" class="dieline"/>')
 
-    # Crop marks — each moved per your list
+    # Crop marks — apply ±4mm shifts as requested
     out.append('<g id="CropMarks">')
     # Top-left
-    out.append(f'<line x1="{-crop_off-4}" y1="{-4}" x2="{-crop_off-crop_len-4}" y2="{-4}" class="dieline"/>')  # horiz left/up
-    out.append(f'<line x1="{-4}" y1="{-crop_off-4}" x2="{-4}" y2="{-crop_off-crop_len-4}" class="dieline"/>')  # vert up/left
-    # Top-right
-    out.append(f'<line x1="{W+crop_off+4}" y1="{-4}" x2="{W+crop_off+crop_len+4}" y2="{-4}" class="dieline"/>')  # horiz right/up
-    out.append(f'<line x1="{W+4}" y1="{-crop_off-4}" x2="{W+4}" y2="{-crop_off-crop_len-4}" class="dieline"/>')  # vert up/right
-    # Bottom-left
-    out.append(f'<line x1="{-crop_off-4}" y1="{H+4}" x2="{-crop_off-crop_len-4}" y2="{H+4}" class="dieline"/>')  # horiz left/down
-    out.append(f'<line x1="{-4}" y1="{H+crop_off+4}" x2="{-4}" y2="{H+crop_off+crop_len+4}" class="dieline"/>')  # vert down/left
-    # Bottom-right
-    out.append(f'<line x1="{W+crop_off+4}" y1="{H+4}" x2="{W+crop_off+crop_len+4}" y2="{H+4}" class="dieline"/>')  # horiz right/down
-    out.append(f'<line x1="{W+4}" y1="{H+crop_off+4}" x2="{W+4}" y2="{H+crop_off+crop_len+4}" class="dieline"/>')  # vert down/right
-    out.append('</g>')
+    # Horizontal mark (moved left by 4mm): base was from -crop_off to -(crop_off+crop_len) at y=0
+    out.append(f'<line x1="{-crop_off - 4.0}" y1="0" x2="{-crop_off - crop_len - 4.0}" y2="0" class="dieline"/>')
+    # Vertical mark (moved up by 4mm): base vertical was at x=0 from y=-crop_off to -(crop_off+crop_len)
+    out.append(f'<line x1="0" y1="{-crop_off - 4.0}" x2="0" y2="{-crop_off - crop_len - 4.0}" class="dieline"/>')
 
-    # --- Measurement ticks ---
-    # TOP
+    # Top-right
+    # Horizontal mark (moved right by 4mm)
+    out.append(f'<line x1="{W + crop_off + 4.0}" y1="0" x2="{W + crop_off + crop_len + 4.0}" y2="0" class="dieline"/>')
+    # Vertical mark (moved up by 4mm)
+    out.append(f'<line x1="{W}" y1="{-crop_off - 4.0}" x2="{W}" y2="{-crop_off - crop_len - 4.0}" class="dieline"/>')
+
+    # Bottom-left
+    # Horizontal mark (moved left by 4mm)
+    out.append(f'<line x1="{-crop_off - 4.0}" y1="{H}" x2="{-crop_off - crop_len - 4.0}" y2="{H}" class="dieline"/>')
+    # Vertical mark (moved down by 4mm)
+    out.append(f'<line x1="0" y1="{H + crop_off + 4.0}" x2="0" y2="{H + crop_off + crop_len + 4.0}" class="dieline"/>')
+
+    # Bottom-right
+    # Horizontal mark (moved right by 4mm)
+    out.append(f'<line x1="{W + crop_off + 4.0}" y1="{H}" x2="{W + crop_off + crop_len + 4.0}" y2="{H}" class="dieline"/>')
+    # Vertical mark (moved down by 4mm)
+    out.append(f'<line x1="{W}" y1="{H + crop_off + 4.0}" x2="{W}" y2="{H + crop_off + crop_len + 4.0}" class="dieline"/>')
+
+    out.append('</g>')  # CropMarks
+
+    # Measurement ticks and labels
+    out.append('<g id="Measurements">')
+    # TOP ticks and numeric labels (moved up by top_shift_up)
     x = 0.0
+    # leftmost tick (at x=0)
+    out.append(f'<line x1="{0}" y1="{-top_shift_up}" x2="{0}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
-        # right edge tick
         x += v
         out.append(f'<line x1="{x}" y1="{-top_shift_up}" x2="{x}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
-        mid = x - v/2
-        out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(round(v))}</text>')
-    # LEFT
+        mid = x - v/2.0
+        out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1.0}" text-anchor="middle" class="text">{int(round(v))}</text>')
+
+    # LEFT ticks and numeric labels (moved left by left_shift_left)
     y = 0.0
+    # topmost left tick at y=0
+    out.append(f'<line x1="{-left_shift_left}" y1="{0}" x2="{-left_shift_left - tick_short}" y2="{0}" class="dieline"/>')
     for v in side_seq:
         y += v
         out.append(f'<line x1="{-left_shift_left}" y1="{y}" x2="{-left_shift_left - tick_short}" y2="{y}" class="dieline"/>')
-        midY = y - v/2
-        out.append(f'<text x="{-left_shift_left - tick_short - 2}" y="{midY}" transform="rotate(-90 {-left_shift_left - tick_short - 2} {midY})" text-anchor="middle" class="text">{int(round(v))}</text>')
+        midY = y - v/2.0
+        # rotate -90 to match Illustrator style and place left by left_shift + tick + small gap
+        label_x = -left_shift_left - tick_short - 2.0
+        out.append(f'<text x="{label_x}" y="{midY}" transform="rotate(-90 {label_x} {midY})" text-anchor="middle" class="text">{int(round(v))}</text>')
 
-    # Centre Seal, Branding, END SEAL (unchanged)
+    out.append('</g>')  # Measurements
+
+    # Centre seal labels and Branding and END SEAL (kept similar)
+    # Centre seal top/bottom
     out.append(f'<text x="{W/2}" y="{5}" text-anchor="middle" class="text" font-weight="bold">CENTRE SEAL AREA</text>')
     out.append(f'<text x="{W/2}" y="{H-2}" text-anchor="middle" class="text" font-weight="bold">CENTRE SEAL AREA</text>')
-    out.append(f'<text x="{W/2}" y="{H/2}" text-anchor="middle" class="text" font-weight="bold">{html.escape(brand_label)}</text>')
-    midy = H/2
+    # Branding
+    total_side = sum(side_seq) if side_seq else H
+    branding_y = total_side/2.0
+    out.append(f'<text x="{W/2}" y="{branding_y}" text-anchor="middle" class="text" font-weight="bold">{html.escape(brand_label)}</text>')
+    # END SEAL left/right rotated
+    midy = H/2.0
     out.append(f'<text x="{-18}" y="{midy}" transform="rotate(-90 {-18} {midy})" text-anchor="middle" class="text" font-weight="bold">END SEAL</text>')
     out.append(f'<text x="{W+18}" y="{midy}" transform="rotate(-90 {W+18} {midy})" text-anchor="middle" class="text" font-weight="bold">END SEAL</text>')
 
     out.append('</svg>')
     return "\n".join(out)
+
 
 
 
