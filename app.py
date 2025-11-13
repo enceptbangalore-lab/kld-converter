@@ -218,7 +218,33 @@ def make_svg(data):
      
 
 
+        # --- Photocell Mark (Top-Right, matches Illustrator) ---
+    out.append('<g id="PhotocellMark">')
+
+    photocell_w = 6    # mm
+    photocell_h = 12   # mm
+    photocell_offset_right = 12  # mm gap from dieline edge
+    photocell_offset_top = 8     # mm gap from top edge
+
+    # Calculate top-right position
+    pc_x = W - photocell_offset_right - photocell_w
+    pc_y = (H - photocell_offset_top - photocell_h)  # subtract to move upward
+
+    # Draw photocell rectangle
+    out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
+
+    # Diagonal tick (top-right corner)
+    pc_diag_x1 = pc_x + photocell_w
+    pc_diag_y1 = pc_y
+    out.append(f'<line x1="{pc_diag_x1}" y1="{pc_diag_y1}" x2="{pc_diag_x1 + 3}" y2="{pc_diag_y1 - 3}" class="dieline"/>')
+
+    # Label text (slightly above/right)
+    label_x = pc_diag_x1 + 2
+    label_y = pc_diag_y1 - 3
+    out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
+
     out.append('</g>')
+
     out.append('</svg>')
     return "\n".join(out)
 
