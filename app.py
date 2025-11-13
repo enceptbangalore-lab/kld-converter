@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width Label)")
+st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width/Height Labels)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -220,7 +220,17 @@ def make_svg(data):
     out.append(f'<line x1="{width_line_x}" y1="0" x2="{width_line_x}" y2="{total_width}" class="dieline"/>')
     midY = total_width / 2
     text = f"width = {int(total_width)} mm"
-    out.append(f'<text x="{width_line_x + 2}" y="{midY}" transform="rotate(-90 {width_line_x + 2} {midY})" text-anchor="middle" class="text">{text}</text>')
+    out.append(f'<text x="{width_line_x + 6}" y="{midY}" transform="rotate(-90 {width_line_x + 6} {midY})" text-anchor="middle" class="text">{text}</text>')
+    out.append('</g>')
+
+    # --- Height Indicator Line & Label (Below Width Line) ---
+    out.append('<g id="HeightMarker">')
+    total_height = sum(top_seq)
+    height_y = total_width + 5  # 5mm below bottom of vertical line
+    out.append(f'<line x1="0" y1="{height_y}" x2="{total_height}" y2="{height_y}" class="dieline"/>')
+    label_y_h = height_y + 6  # 6mm below this horizontal line
+    text_h = f"height = {int(total_height)} mm"
+    out.append(f'<text x="{total_height/2}" y="{label_y_h}" text-anchor="middle" class="text">{text_h}</text>')
     out.append('</g>')
 
     out.append('</svg>')
