@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Production v8pt)")
+st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width Label)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -198,23 +198,29 @@ def make_svg(data):
     out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
     out.append('</g>')
 
-    # --- Photocell Mark (TOP-RIGHT, top edge aligned with dieline) ---
+    # --- Photocell Mark (TOP-RIGHT) ---
     out.append('<g id="PhotocellMark">')
     photocell_w = 6
     photocell_h = 12
-    pc_x = W - photocell_w      # flush with right dieline
-    pc_y = 0                    # top edge aligns with dieline
+    pc_x = W - photocell_w
+    pc_y = 0
     out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
-
-    # Diagonal tick (top-right corner)
     pc_diag_x1 = pc_x + photocell_w
     pc_diag_y1 = pc_y
     out.append(f'<line x1="{pc_diag_x1}" y1="{pc_diag_y1}" x2="{pc_diag_x1 + 3}" y2="{pc_diag_y1 - 3}" class="dieline"/>')
-
-    # Label slightly above-right
     label_x = pc_diag_x1 + 2
     label_y = pc_diag_y1 - 3
     out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
+    out.append('</g>')
+
+    # --- Width Indicator Line & Label (Right of Photocell) ---
+    out.append('<g id="WidthMarker">')
+    total_width = sum(side_seq)
+    width_line_x = pc_x + photocell_w + 4  # 4mm gap from photocell
+    out.append(f'<line x1="{width_line_x}" y1="0" x2="{width_line_x}" y2="{total_width}" class="dieline"/>')
+    midY = total_width / 2
+    text = f"width = {int(total_width)} mm"
+    out.append(f'<text x="{width_line_x + 2}" y="{midY}" transform="rotate(-90 {width_line_x + 2} {midY})" text-anchor="middle" class="text">{text}</text>')
     out.append('</g>')
 
     out.append('</svg>')
