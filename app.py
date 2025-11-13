@@ -153,7 +153,7 @@ def make_svg(data):
     # --- Style ---
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_mm = 8 / 2.8346    # ≈ 2.82 mm (8 pt)
+    font_mm = 2.8346    # ≈ 2.82 mm (8 pt)
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
