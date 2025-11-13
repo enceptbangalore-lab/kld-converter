@@ -209,11 +209,13 @@ def make_svg(data):
     # Vertical (↓ down, shifted by crop_off)
     out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
 
-    # --- BOTTOM-RIGHT ---
-    # Horizontal (→ right)
-    out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
-    # Vertical (↓ down, shifted by crop_off)
-    out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+        # --- BOTTOM-LEFT (repositioned outward) ---
+    # Horizontal → left (moved left by crop_off)
+    out.append(f'<line x1="{-crop_off}" y1="0" x2="{-crop_off - crop_len}" y2="0" class="dieline"/>')
+
+    # Vertical → down (moved down by crop_off)
+    out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
+
 
     out.append('</g>')
     out.append('</svg>')
