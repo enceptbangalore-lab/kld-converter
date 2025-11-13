@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final v8pt + Width/Height Labels + Boxes + Top Text Down 4 mm)")
+st.title("📏 KLD Excel → SVG Generator (Final v8pt + Width/Height Labels + Boxes + Text Adjustments)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -160,7 +160,7 @@ def make_svg(data):
     crop_off = 5.0
     crop_len = 5.0
     left_text_shift_right = 6.0
-    top_text_shift_down = 4.0  # NEW: move top measurement texts 4mm downward
+    top_text_shift_down = 4.0
 
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
@@ -175,7 +175,7 @@ def make_svg(data):
     # --- Measurement ticks and labels ---
     out.append('<g id="Measurements">')
 
-    # TOP ticks and text (moved 4mm down)
+    # TOP ticks and text (4mm down)
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
@@ -187,7 +187,7 @@ def make_svg(data):
             f'text-anchor="middle" class="text">{int(v)}</text>'
         )
 
-    # LEFT ticks and text (moved 6mm right)
+    # LEFT ticks and text (+6mm right)
     y = 0
     out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
     for v in side_seq:
@@ -243,6 +243,21 @@ def make_svg(data):
     label_y_h = height_y + 6
     text_h = f"height = {int(total_height)} mm"
     out.append(f'<text x="{total_height/2}" y="{label_y_h}" text-anchor="middle" class="text">{text_h}</text>')
+    out.append('</g>')
+
+    # --- Dynamic Boxes ---
+    out.append('<g id="DynamicBoxes">')
+    if top_seq and side_seq:
+        max_top = max(top_seq)
+        max_idx = next(i for i, v in enumerate(top_seq) if v == max_top)
+        left_x = sum(top_seq[:max_idx])
+        skip = 2
+        while skip < len(side_seq):
+            top_y = sum(side_seq[:skip])
+            if skip < len(side_seq):
+                height = side_seq[skip]
+                out.append(f'<rect x="{left_x}" y="{top_y}" width="{max_top}" height="{height}" class="dieline"/>')
+            skip += 3
     out.append('</g>')
 
     out.append('</svg>')
