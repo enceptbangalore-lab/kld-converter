@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width/Height Labels + Boxes)")
+st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width/Height Labels + Boxes + Left Text Shift)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -159,6 +159,7 @@ def make_svg(data):
     left_shift_left = 5.0
     crop_off = 5.0
     crop_len = 5.0
+    left_text_shift_right = 6.0  # only for left sequence text
 
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
@@ -173,7 +174,7 @@ def make_svg(data):
     # --- Measurement ticks and labels ---
     out.append('<g id="Measurements">')
 
-    # TOP ticks and text
+    # TOP ticks and text (unchanged)
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
@@ -182,14 +183,14 @@ def make_svg(data):
         mid = x - v / 2
         out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
 
-    # LEFT ticks and text
+    # LEFT ticks and text (moved 6mm right)
     y = 0
     out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
     for v in side_seq:
         y += v
         out.append(f'<line x1="{-left_shift_left}" y1="{y}" x2="{-left_shift_left - tick_short}" y2="{y}" class="dieline"/>')
         midY = y - v / 2
-        lx = -left_shift_left - tick_short - 2
+        lx = -left_shift_left - tick_short - 2 + left_text_shift_right
         out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
@@ -214,62 +215,24 @@ def make_svg(data):
     out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
     out.append('</g>')
 
-    # --- Width Indicator Line & Label (Right of Photocell) ---
+    # --- Width Indicator Line & Label ---
     out.append('<g id="WidthMarker">')
     total_width = sum(side_seq)
-    width_line_x = pc_x + photocell_w + 4  # 4mm gap from photocell
+    width_line_x = pc_x + photocell_w + 4
     out.append(f'<line x1="{width_line_x}" y1="0" x2="{width_line_x}" y2="{total_width}" class="dieline"/>')
     midY = total_width / 2
     text = f"width = {int(total_width)} mm"
     out.append(f'<text x="{width_line_x + 6}" y="{midY}" transform="rotate(-90 {width_line_x + 6} {midY})" text-anchor="middle" class="text">{text}</text>')
     out.append('</g>')
 
-    # --- Height Indicator Line & Label (Below Width Line) ---
+    # --- Height Indicator Line & Label ---
     out.append('<g id="HeightMarker">')
     total_height = sum(top_seq)
-    height_y = total_width + 5  # 5mm below bottom of vertical line
+    height_y = total_width + 5
     out.append(f'<line x1="0" y1="{height_y}" x2="{total_height}" y2="{height_y}" class="dieline"/>')
-    label_y_h = height_y + 6  # 6mm below this horizontal line
+    label_y_h = height_y + 6
     text_h = f"height = {int(total_height)} mm"
     out.append(f'<text x="{total_height/2}" y="{label_y_h}" text-anchor="middle" class="text">{text_h}</text>')
-    out.append('</g>')
-
-    # --- Dynamic Boxes (width = max(top_seq)) ---
-    out.append('<g id="DynamicBoxes">')
-    # convert to numeric lists (in case top_seq or side_seq are empty)
-    ts = [float(v) for v in top_seq] if isinstance(top_seq, (list, tuple)) else top_seq
-    ss = [float(v) for v in side_seq] if isinstance(side_seq, (list, tuple)) else side_seq
-
-    # ensure lists
-    top_seq_list = top_seq if isinstance(top_seq, list) else top_seq
-    side_seq_list = side_seq if isinstance(side_seq, list) else side_seq
-
-    # In our function parse_seq already returns lists; ensure safe fallback
-    top_seq_vals = parse_seq(data.get("top_seq"))
-    side_seq_vals = parse_seq(data.get("side_seq"))
-
-    if top_seq_vals and side_seq_vals:
-        max_top = max(top_seq_vals)
-        # find first index of max_top (to compute left offset)
-        max_idx = 0
-        for ii, val in enumerate(top_seq_vals):
-            if val == max_top:
-                max_idx = ii
-                break
-        # left X = sum of top_seq values before max_idx
-        left_x = sum(top_seq_vals[:max_idx]) if max_idx > 0 else 0
-
-        # skip pattern: 2,5,8,11...
-        skip = 2
-        box_count = 0
-        while skip < len(side_seq_vals):
-            top_y = sum(side_seq_vals[:skip])  # top position
-            height = side_seq_vals[skip]       # height from that index
-            # draw rect only if positive height
-            if height > 0:
-                out.append(f'<rect x="{left_x}" y="{top_y}" width="{max_top}" height="{height}" class="dieline"/>')
-                box_count += 1
-            skip += 3
     out.append('</g>')
 
     out.append('</svg>')
