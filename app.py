@@ -202,12 +202,16 @@ def make_svg(data):
     out.append('<g id="PhotocellMark">')
     photocell_w = 6
     photocell_h = 12
-    pc_x = W - photocell_w          # flush with right edge
-    pc_y = H                        # top edge aligns with dieline
-    out.append(f'<rect x="{pc_x}" y="{pc_y - photocell_h}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
+    pc_x = W - photocell_w      # flush with right dieline
+    pc_y = 0                    # top edge aligns with dieline
+    out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
+
+    # Diagonal tick (top-right corner)
     pc_diag_x1 = pc_x + photocell_w
-    pc_diag_y1 = pc_y - photocell_h
+    pc_diag_y1 = pc_y
     out.append(f'<line x1="{pc_diag_x1}" y1="{pc_diag_y1}" x2="{pc_diag_x1 + 3}" y2="{pc_diag_y1 - 3}" class="dieline"/>')
+
+    # Label slightly above-right
     label_x = pc_diag_x1 + 2
     label_y = pc_diag_y1 - 3
     out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
