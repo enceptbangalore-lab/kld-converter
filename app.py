@@ -4,8 +4,8 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Release)")
-st.caption("Reads KLD Excel, extracts width/cut dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
+st.title("📏 KLD Excel → SVG Generator (Final Illustrator 8 pt Version)")
+st.caption("Reads KLD Excel, extracts sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
 # Helper functions
@@ -150,22 +150,21 @@ def make_svg(data):
     side_seq = parse_seq(data.get("side_seq"))
 
     # --- Style ---
-dieline = "#92278f"
-stroke_pt = 0.356
-font_pt = 8           # Illustrator-native 8pt
-tick_short = 5.0
-top_shift_up = 5.0
-left_shift_left = 5.0
-crop_off = 5.0
-crop_len = 5.0
+    dieline = "#92278f"
+    stroke_pt = 0.356
+    font_pt = 8          # Illustrator-native 8 pt
+    tick_short = 5.0
+    top_shift_up = 5.0
+    left_shift_left = 5.0
+    crop_off = 5.0
+    crop_len = 5.0
 
-out = []
-out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
-out.append('<defs><style><![CDATA[')
-out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-out.append(f'.text{{font-family:Arial; font-size:{font_pt}pt; fill:{dieline};}}')
-out.append(']]></style></defs>')
-
+    out = []
+    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
+    out.append('<defs><style><![CDATA[')
+    out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
+    out.append(f'.text{{font-family:Arial; font-size:{font_pt}pt; fill:{dieline};}}')
+    out.append(']]></style></defs>')
 
     # --- Outer dieline box ---
     out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
@@ -195,13 +194,13 @@ out.append(']]></style></defs>')
 
     # --- Crop Marks (selected only) ---
     out.append('<g id="CropMarks">')
-    # Right horizontal (outward → right)
+    # Right horizontal (→ right)
     out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
-    # Bottom left vertical (outward → down)
-    out.append(f'<line x1="0" y1="{0 - crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right vertical (outward → down)
-    out.append(f'<line x1="{W}" y1="{0 - crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right horizontal (outward → right)
+    # Bottom left vertical (↓ down)
+    out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
+    # Bottom right vertical (↓ down)
+    out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+    # Bottom right horizontal (→ right)
     out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
     out.append('</g>')
 
