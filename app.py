@@ -2,14 +2,13 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-import html
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final v7)")
-st.caption("Reads Excel, extracts dimensions, sequences & generates an editable SVG dieline for Illustrator QC.")
+st.title("📏 KLD Excel → SVG Generator (Final Release)")
+st.caption("Reads KLD Excel, extracts width/cut dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
-# Helper Functions
+# Helper functions
 # ---------------------------------------------------
 
 def clean_numeric_list(seq):
@@ -45,25 +44,6 @@ def auto_trim_to_target(values, target, tol=1.0):
     return vals
 
 
-def extract_print_areas(lines):
-    """Extract Print Area (left/right) and Printing Area (main)."""
-    finarea_left = finarea_right = printarea = ""
-    for ln in lines:
-        if re.search(r"print\s*area", ln, re.IGNORECASE):
-            pairs = re.findall(r"(\d+)\s*[*xX]\s*(\d+)", ln)
-            if len(pairs) == 1:
-                finarea_left = f"{pairs[0][0]}x{pairs[0][1]} mm"
-            elif len(pairs) >= 2:
-                finarea_left = f"{pairs[0][0]}x{pairs[0][1]} mm"
-                finarea_right = f"{pairs[1][0]}x{pairs[1][1]} mm"
-
-        if re.search(r"printing\s*area", ln, re.IGNORECASE):
-            w, h = first_pair_from_text(ln)
-            if w and h:
-                printarea = f"{w}x{h} mm"
-    return finarea_left, finarea_right, printarea
-
-
 def extract_dimensions(lines):
     """Extract main width x cut_length dimensions."""
     for ln in lines:
@@ -75,7 +55,7 @@ def extract_dimensions(lines):
 
 
 # ---------------------------------------------------
-# Data Extraction
+# Data extraction
 # ---------------------------------------------------
 
 def extract_kld_data(df):
@@ -85,6 +65,7 @@ def extract_kld_data(df):
     header_lines = []
     start_row = 0
 
+    # find header and numeric table start
     for i in range(min(60, len(df))):
         row = df.iloc[i].tolist()
         line_text = " ".join([s.strip() for s in row if s.strip()])
@@ -103,7 +84,6 @@ def extract_kld_data(df):
     ]
 
     width_mm, cut_length_mm = extract_dimensions(search_lines)
-    finarea_left, finarea_right, printarea = extract_print_areas(search_lines)
 
     df_num = df.iloc[start_row:].reset_index(drop=True)
     top_seq_nums, side_seq_nums = [], []
@@ -147,19 +127,11 @@ def extract_kld_data(df):
         "cut_length_mm": cut_length_mm,
         "top_seq": top_seq,
         "side_seq": side_seq,
-        "finarea_left": finarea_left,
-        "finarea_right": finarea_right,
-        "printarea": printarea,
-        "photocell_w": 6,
-        "photocell_h": 12,
-        "photocell_offset_right_mm": 12,
-        "stroke_mm": 0.25,
-        "brand_label": "BRANDING",
     }
 
 
 # ---------------------------------------------------
-# SVG Generator (your final spec)
+# SVG generator
 # ---------------------------------------------------
 
 def make_svg(data):
@@ -177,28 +149,31 @@ def make_svg(data):
     top_seq = parse_seq(data.get("top_seq"))
     side_seq = parse_seq(data.get("side_seq"))
 
-    dieline = "#92278f"
-    stroke_pt = 0.356
-    font_pt = 8         # pt for correct Illustrator scale
-    tick_short = 5.0
-    top_shift_up = 5.0
-    left_shift_left = 5.0
-    crop_off = 5.0
-    crop_len = 5.0
+    # --- Style ---
+dieline = "#92278f"
+stroke_pt = 0.356
+font_pt = 8           # Illustrator-native 8pt
+tick_short = 5.0
+top_shift_up = 5.0
+left_shift_left = 5.0
+crop_off = 5.0
+crop_len = 5.0
 
 out = []
-out.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}">')
+out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
 out.append('<defs><style><![CDATA[')
 out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-out.append(f'.text{{font-family:Arial; font-size:8pt; fill:{dieline};}}')
+out.append(f'.text{{font-family:Arial; font-size:{font_pt}pt; fill:{dieline};}}')
 out.append(']]></style></defs>')
 
-# --- Outer dieline box ---
-out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
+
+    # --- Outer dieline box ---
+    out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
 
     # --- Measurement ticks and labels ---
     out.append('<g id="Measurements">')
-    # TOP ticks and labels
+
+    # TOP ticks and text
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
@@ -207,7 +182,7 @@ out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
         mid = x - v / 2
         out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
 
-    # LEFT ticks and labels
+    # LEFT ticks and text
     y = 0
     out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
     for v in side_seq:
@@ -218,37 +193,41 @@ out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
         out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
-    # --- Crop Marks ---
+    # --- Crop Marks (selected only) ---
     out.append('<g id="CropMarks">')
-    # Right horizontal (outward, +X)
+    # Right horizontal (outward → right)
     out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
-    # Bottom left vertical (outward, +Y)
+    # Bottom left vertical (outward → down)
     out.append(f'<line x1="0" y1="{0 - crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right vertical (outward, +Y)
+    # Bottom right vertical (outward → down)
     out.append(f'<line x1="{W}" y1="{0 - crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right horizontal (outward, +X)
+    # Bottom right horizontal (outward → right)
     out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
     out.append('</g>')
 
     out.append('</svg>')
     return "\n".join(out)
 
+
 # ---------------------------------------------------
-# Streamlit Execution
+# Streamlit execution
 # ---------------------------------------------------
 
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
+
 if uploaded_file:
     data = uploaded_file.read()
     uploaded_file.seek(0)
     df = pd.read_excel(io.BytesIO(data), header=None, engine="openpyxl")
 
-    res = extract_kld_data(df)
-    svg_data = make_svg(res)
+    try:
+        res = extract_kld_data(df)
+        svg_data = make_svg(res)
 
-    st.success("✅ Processed successfully.")
-    st.download_button("⬇️ Download SVG File", svg_data, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
-    st.code(res["side_seq"], language="text")
-    st.caption("Previewed side_seq above — verify matches Excel structure.")
+        st.success("✅ Processed successfully.")
+        st.download_button("⬇️ Download SVG File", svg_data, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
+        st.code(f"side_seq: {res['side_seq']}", language="text")
+    except Exception as e:
+        st.error(f"❌ Conversion failed: {e}")
 else:
     st.info("Please upload a KLD Excel file to begin.")
