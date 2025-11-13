@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final Production v8pt + Width/Height Labels + Boxes + Left Text Shift)")
+st.title("📏 KLD Excel → SVG Generator (Final v8pt + Width/Height Labels + Boxes + Top Text Down 4 mm)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -159,7 +159,8 @@ def make_svg(data):
     left_shift_left = 5.0
     crop_off = 5.0
     crop_len = 5.0
-    left_text_shift_right = 6.0  # only for left sequence text
+    left_text_shift_right = 6.0
+    top_text_shift_down = 4.0  # NEW: move top measurement texts 4mm downward
 
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
@@ -174,14 +175,17 @@ def make_svg(data):
     # --- Measurement ticks and labels ---
     out.append('<g id="Measurements">')
 
-    # TOP ticks and text (unchanged)
+    # TOP ticks and text (moved 4mm down)
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
         x += v
         out.append(f'<line x1="{x}" y1="{-top_shift_up}" x2="{x}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
         mid = x - v / 2
-        out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(
+            f'<text x="{mid}" y="{-top_shift_up - tick_short - 1 + top_text_shift_down}" '
+            f'text-anchor="middle" class="text">{int(v)}</text>'
+        )
 
     # LEFT ticks and text (moved 6mm right)
     y = 0
@@ -191,7 +195,10 @@ def make_svg(data):
         out.append(f'<line x1="{-left_shift_left}" y1="{y}" x2="{-left_shift_left - tick_short}" y2="{y}" class="dieline"/>')
         midY = y - v / 2
         lx = -left_shift_left - tick_short - 2 + left_text_shift_right
-        out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(
+            f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" '
+            f'text-anchor="middle" class="text">{int(v)}</text>'
+        )
     out.append('</g>')
 
     # --- Crop Marks ---
@@ -222,7 +229,10 @@ def make_svg(data):
     out.append(f'<line x1="{width_line_x}" y1="0" x2="{width_line_x}" y2="{total_width}" class="dieline"/>')
     midY = total_width / 2
     text = f"width = {int(total_width)} mm"
-    out.append(f'<text x="{width_line_x + 6}" y="{midY}" transform="rotate(-90 {width_line_x + 6} {midY})" text-anchor="middle" class="text">{text}</text>')
+    out.append(
+        f'<text x="{width_line_x + 6}" y="{midY}" transform="rotate(-90 {width_line_x + 6} {midY})" '
+        f'text-anchor="middle" class="text">{text}</text>'
+    )
     out.append('</g>')
 
     # --- Height Indicator Line & Label ---
