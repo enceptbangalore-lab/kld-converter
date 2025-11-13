@@ -200,21 +200,21 @@ def make_svg(data):
     #out.append(f'<line x1="0" y1="{H}" x2="0" y2="{H + crop_off + crop_len}" class="dieline"/>')  # vertical ↑ up
 
     # TOP-RIGHT
-    #out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')  # horizontal → right
+    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')  # horizontal → right
     #out.append(f'<line x1="{W}" y1="{H}" x2="{W}" y2="{H + crop_off + crop_len}" class="dieline"/>')             # vertical ↑ up
 
     # Bottom-Left  (offset outward)
     # horizontal ← left, positioned 5 mm below dieline baseline
     #out.append(f'<line x1="0" y1="{-crop_off}" x2="{-crop_len}" y2="{-crop_off}" class="dieline"/>')
     # vertical ↓ down, positioned 5 mm left of dieline edge
-    #out.append(f'<line x1="{-crop_off}" y1="0" x2="{-crop_off}" y2="{-crop_len}" class="dieline"/>')
+    out.append(f'<line x1="{-crop_off}" y1="0" x2="{-crop_off}" y2="{-crop_len}" class="dieline"/>')
 
 
     # --- BOTTOM-RIGHT ---
     # Horizontal (→ right)
-    #out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
+    out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
     # Vertical (↓ down, shifted by crop_off)
-    #out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+    out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
 
 
      
