@@ -192,57 +192,27 @@ def make_svg(data):
         out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
-    # --- Crop Marks (all corners) ---
+    # --- Crop Marks (some commented intentionally for testing) ---
     out.append('<g id="CropMarks">')
-
-    # TOP-LEFT
-    #out.append(f'<line x1="0" y1="{H}" x2="{-crop_off - crop_len}" y2="{H}" class="dieline"/>')   # horizontal ← left
-    #out.append(f'<line x1="0" y1="{H}" x2="0" y2="{H + crop_off + crop_len}" class="dieline"/>')  # vertical ↑ up
-
-    # TOP-RIGHT
-    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')  # horizontal → right
-    #out.append(f'<line x1="{W}" y1="{H}" x2="{W}" y2="{H + crop_off + crop_len}" class="dieline"/>')             # vertical ↑ up
-
-    # Bottom-Left  (offset outward)
-    # vertical ↓ down, positioned 5 mm left of dieline edge
-    #out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_len}" class="dieline"/>')
-
-
-    # --- BOTTOM-RIGHT ---
-    # Horizontal (→ right)
+    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
     out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
-    # Vertical (↓ down, shifted by crop_off)
-    #out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+    out.append('</g>')
 
-
-     
-
-
-        # --- Photocell Mark (Top-Right, matches Illustrator) ---
+    # --- Photocell Mark (Top-Right, matches Illustrator) ---
     out.append('<g id="PhotocellMark">')
-
-    photocell_w = 6    # mm
-    photocell_h = 12   # mm
-    photocell_offset_right = 12  # mm gap from dieline edge
-    photocell_offset_top = 8     # mm gap from top edge
-
-    # Calculate top-right position
+    photocell_w = 6
+    photocell_h = 12
+    photocell_offset_right = 12
+    photocell_offset_top = 8
     pc_x = W - photocell_offset_right - photocell_w
-    pc_y = (H - photocell_offset_top - photocell_h)  # subtract to move upward
-
-    # Draw photocell rectangle
+    pc_y = (H - photocell_offset_top - photocell_h)
     out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
-
-    # Diagonal tick (top-right corner)
     pc_diag_x1 = pc_x + photocell_w
     pc_diag_y1 = pc_y
     out.append(f'<line x1="{pc_diag_x1}" y1="{pc_diag_y1}" x2="{pc_diag_x1 + 3}" y2="{pc_diag_y1 - 3}" class="dieline"/>')
-
-    # Label text (slightly above/right)
     label_x = pc_diag_x1 + 2
     label_y = pc_diag_y1 - 3
     out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
-
     out.append('</g>')
 
     out.append('</svg>')
