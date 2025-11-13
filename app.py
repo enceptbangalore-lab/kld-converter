@@ -152,7 +152,7 @@ def make_svg(data):
     # --- Style ---
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_mm = 8 / 2.8346    # ≈ 2.82 mm physical 8 pt
+    font_mm = 8 / 2.8346    # ≈ 2.82 mm (8 pt)
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
@@ -192,23 +192,21 @@ def make_svg(data):
         out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
-    # --- Crop Marks (some commented intentionally for testing) ---
+    # --- Crop Marks ---
     out.append('<g id="CropMarks">')
     out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
     out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
     out.append('</g>')
 
-    # --- Photocell Mark (Top-Right, matches Illustrator) ---
+    # --- Photocell Mark (TOP-RIGHT, top edge aligned with dieline) ---
     out.append('<g id="PhotocellMark">')
     photocell_w = 6
     photocell_h = 12
-    photocell_offset_right = 12
-    photocell_offset_top = 8
-    pc_x = W - photocell_offset_right - photocell_w
-    pc_y = (H - photocell_offset_top - photocell_h)
-    out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
+    pc_x = W - photocell_w          # flush with right edge
+    pc_y = H                        # top edge aligns with dieline
+    out.append(f'<rect x="{pc_x}" y="{pc_y - photocell_h}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
     pc_diag_x1 = pc_x + photocell_w
-    pc_diag_y1 = pc_y
+    pc_diag_y1 = pc_y - photocell_h
     out.append(f'<line x1="{pc_diag_x1}" y1="{pc_diag_y1}" x2="{pc_diag_x1 + 3}" y2="{pc_diag_y1 - 3}" class="dieline"/>')
     label_x = pc_diag_x1 + 2
     label_y = pc_diag_y1 - 3
