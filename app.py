@@ -134,78 +134,34 @@ def extract_kld_data(df):
 # SVG generator
 # ---------------------------------------------------
 
-def make_svg(data):
-    def parse_seq(src):
-        if src is None:
-            return []
-        if isinstance(src, (list, tuple)):
-            return [float(x) for x in src if x]
-        s = str(src).replace(";", ",").replace("|", ",")
-        parts = [p.strip() for p in s.split(",") if p.strip()]
-        return [float(p) for p in parts if re.match(r"^\d+(\.\d+)?$", p)]
-
-    W = float(data.get("cut_length_mm") or 0)
-    H = float(data.get("width_mm") or 0)
-    top_seq = parse_seq(data.get("top_seq"))
-    side_seq = parse_seq(data.get("side_seq"))
-
-    # --- Style ---
-    dieline = "#92278f"
-    stroke_pt = 0.356
-    font_mm = 2.8          # Illustrator-native 8 pt
-    tick_short = 5.0
-    top_shift_up = 5.0
-    left_shift_left = 5.0
-    crop_off = 5.0
-    crop_len = 5.0
-
-    out = []
-    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
-    out.append('<defs><style><![CDATA[')
-    out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-    out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
-    out.append(']]></style></defs>')
-
-    # --- Outer dieline box ---
-    out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
-
-    # --- Measurement ticks and labels ---
-    out.append('<g id="Measurements">')
-
-    # TOP ticks and text
-    x = 0
-    out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
-    for v in top_seq:
-        x += v
-        out.append(f'<line x1="{x}" y1="{-top_shift_up}" x2="{x}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
-        mid = x - v / 2
-        out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
-
-    # LEFT ticks and text
-    y = 0
-    out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
-    for v in side_seq:
-        y += v
-        out.append(f'<line x1="{-left_shift_left}" y1="{y}" x2="{-left_shift_left - tick_short}" y2="{y}" class="dieline"/>')
-        midY = y - v / 2
-        lx = -left_shift_left - tick_short - 2
-        out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
-    out.append('</g>')
-
-    # --- Crop Marks (selected only) ---
+    # --- Crop Marks (all corners, full directional set) ---
     out.append('<g id="CropMarks">')
-    # Right horizontal (→ right)
-    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
-    # Bottom left vertical (↓ down)
-    out.append(f'<line x1="0" y1="{-crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right vertical (↓ down)
-    out.append(f'<line x1="{W}" y1="{-crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
-    # Bottom right horizontal (→ right)
-    out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
-    out.append('</g>')
 
-    out.append('</svg>')
-    return "\n".join(out)
+    # --- TOP-LEFT ---
+    # Horizontal (→ left)
+    out.append(f'<line x1="0" y1="{H}" x2="{-crop_off - crop_len}" y2="{H}" class="dieline"/>')
+    # Vertical (↑ up)
+    out.append(f'<line x1="0" y1="{H}" x2="0" y2="{H + crop_off + crop_len}" class="dieline"/>')
+
+    # --- TOP-RIGHT ---
+    # Horizontal (→ right)
+    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
+    # Vertical (↑ up)
+    out.append(f'<line x1="{W}" y1="{H}" x2="{W}" y2="{H + crop_off + crop_len}" class="dieline"/>')
+
+    # --- BOTTOM-LEFT ---
+    # Horizontal (→ left)
+    out.append(f'<line x1="0" y1="0" x2="{-crop_off - crop_len}" y2="0" class="dieline"/>')
+    # Vertical (↓ down)
+    out.append(f'<line x1="0" y1="0" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
+
+    # --- BOTTOM-RIGHT ---
+    # Horizontal (→ right)
+    out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
+    # Vertical (↓ down)
+    out.append(f'<line x1="{W}" y1="0" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+
+    out.append('</g>')
 
 
 # ---------------------------------------------------
