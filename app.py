@@ -163,7 +163,7 @@ def make_svg(data):
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
     out.append('<defs><style><![CDATA[')
     out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-    out.append(f'.text{{font-family:Arial; font-size:{font_pt}mm; fill:{dieline};}}')
+    out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
     # --- Outer dieline box ---
