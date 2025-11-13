@@ -4,8 +4,8 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Centered within Expanded Artboard)")
-st.caption("Ensures all dieline elements fit inside the artboard with uniform margins.")
+st.title("📏 KLD Excel → SVG Generator (All Marks Inside Artboard)")
+st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC with all elements inside the artboard.")
 
 # ---------------------------------------------------
 # Helper functions
@@ -159,19 +159,28 @@ def make_svg(data):
     # --- Outer dieline ---
     out.append(f'<rect x="{margin}" y="{margin}" width="{W}" height="{H}" class="dieline"/>')
 
-    # --- Measurement ticks and labels ---
+    # --- Measurement ticks + text ---
     out.append('<g id="Measurements">')
+
+    # TOP ticks & labels
     x = 0
+    out.append(f'<line x1="{margin}" y1="{margin - top_shift_up}" x2="{margin}" y2="{margin - top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
         x += v
+        out.append(f'<line x1="{margin + x}" y1="{margin - top_shift_up}" x2="{margin + x}" y2="{margin - top_shift_up - tick_short}" class="dieline"/>')
         mid = x - v / 2
         out.append(f'<text x="{margin + mid}" y="{margin - top_shift_up - tick_short - 1 + top_text_shift_down}" text-anchor="middle" class="text">{int(v)}</text>')
+
+    # LEFT ticks & labels
     y = 0
+    out.append(f'<line x1="{margin - left_shift_left}" y1="{margin}" x2="{margin - left_shift_left - tick_short}" y2="{margin}" class="dieline"/>')
     for v in side_seq:
         y += v
+        out.append(f'<line x1="{margin - left_shift_left}" y1="{margin + y}" x2="{margin - left_shift_left - tick_short}" y2="{margin + y}" class="dieline"/>')
         midY = y - v / 2
         lx = margin - left_shift_left - tick_short - 2 + left_text_shift_right
         out.append(f'<text x="{lx}" y="{margin + midY}" transform="rotate(-90 {lx} {margin + midY})" text-anchor="middle" class="text">{int(v)}</text>')
+
     out.append('</g>')
 
     # --- Crop Marks ---
