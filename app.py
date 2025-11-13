@@ -4,7 +4,7 @@ import re
 import io
 
 st.set_page_config(page_title="KLD Excel → SVG Generator", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Final v8pt + Width/Height Labels + Boxes + Text Adjustments)")
+st.title("📏 KLD Excel → SVG Generator (Final v8pt + Wider Artboard + Boxes + Text Adjustments)")
 st.caption("Reads KLD Excel, extracts dimensions and sequences, and generates editable SVG dieline for Illustrator QC.")
 
 # ---------------------------------------------------
@@ -150,6 +150,11 @@ def make_svg(data):
     top_seq = parse_seq(data.get("top_seq"))
     side_seq = parse_seq(data.get("side_seq"))
 
+    # --- enlarge artboard ---
+    extra_space = 60.0  # add 60mm width + height
+    canvas_W = W + extra_space
+    canvas_H = H + extra_space
+
     # --- Style ---
     dieline = "#92278f"
     stroke_pt = 0.356
@@ -163,7 +168,7 @@ def make_svg(data):
     top_text_shift_down = 4.0
 
     out = []
-    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
+    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_W}mm" height="{canvas_H}mm" viewBox="0 0 {canvas_W} {canvas_H}">')
     out.append('<defs><style><![CDATA[')
     out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
     out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
