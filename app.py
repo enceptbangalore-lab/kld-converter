@@ -152,7 +152,7 @@ def make_svg(data):
     # --- Style ---
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_pt = 8          # Illustrator-native 8 pt
+    font_mm = 2.8          # Illustrator-native 8 pt
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
@@ -160,10 +160,10 @@ def make_svg(data):
     crop_len = 5.0
 
     out = []
-    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}pt" height="{H}pt" viewBox="0 0 {W} {H}">')
+    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}mm" height="{H}mm" viewBox="0 0 {W} {H}">')
     out.append('<defs><style><![CDATA[')
     out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-    out.append(f'.text{{font-family:Arial; font-size:{font_pt}pt; fill:{dieline};}}')
+    out.append(f'.text{{font-family:Arial; font-size:{font_pt}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
     # --- Outer dieline box ---
