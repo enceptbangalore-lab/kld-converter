@@ -176,14 +176,10 @@ def make_svg(data):
     H = float(data.get("width_mm") or 0)
     top_seq = parse_seq(data.get("top_seq"))
     side_seq = parse_seq(data.get("side_seq"))
-    pcw = float(data.get("photocell_w") or 6)
-    pch = float(data.get("photocell_h") or 12)
-    pc_off = float(data.get("photocell_offset_right_mm") or 12)
-    brand_label = str(data.get("brand_label") or "BRANDING")
 
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_pt = 3.2
+    font_pt = 8         # pt for correct Illustrator scale
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
@@ -197,52 +193,45 @@ def make_svg(data):
     out.append(f'.text{{font-family:Arial; font-size:{font_pt}pt; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Outer dieline
+    # --- Outer dieline box ---
     out.append(f'<rect x="0" y="0" width="{W}" height="{H}" class="dieline"/>')
 
-    # Fold lines
-    x = 0
-    for v in top_seq[:-1]:
-        x += v
-        out.append(f'<line x1="{x}" y1="0" x2="{x}" y2="{H}" class="dieline" style=""/>')
-
-    # Optional centered dashed fold lines across main panel only
-
-
-    y = 0
-    max_top = max(top_seq) if top_seq else W
-    x_offset = (W - max_top) / 2  # center main panel horizontally
-
-    for v in side_seq[:-1]:
-        y += v
-        x1 = x_offset
-        x2 = x_offset + max_top
-        out.append(f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" class="dieline"/>')
-
-
-
-    # Measurements
+    # --- Measurement ticks and labels ---
     out.append('<g id="Measurements">')
+    # TOP ticks and labels
     x = 0
     out.append(f'<line x1="0" y1="{-top_shift_up}" x2="0" y2="{-top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
         x += v
         out.append(f'<line x1="{x}" y1="{-top_shift_up}" x2="{x}" y2="{-top_shift_up - tick_short}" class="dieline"/>')
-        mid = x - v/2
+        mid = x - v / 2
         out.append(f'<text x="{mid}" y="{-top_shift_up - tick_short - 1}" text-anchor="middle" class="text">{int(v)}</text>')
+
+    # LEFT ticks and labels
     y = 0
     out.append(f'<line x1="{-left_shift_left}" y1="0" x2="{-left_shift_left - tick_short}" y2="0" class="dieline"/>')
     for v in side_seq:
         y += v
         out.append(f'<line x1="{-left_shift_left}" y1="{y}" x2="{-left_shift_left - tick_short}" y2="{y}" class="dieline"/>')
-        midY = y - v/2
+        midY = y - v / 2
         lx = -left_shift_left - tick_short - 2
         out.append(f'<text x="{lx}" y="{midY}" transform="rotate(-90 {lx} {midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
+    # --- Crop Marks ---
+    out.append('<g id="CropMarks">')
+    # Right horizontal (outward, +X)
+    out.append(f'<line x1="{W + crop_off}" y1="{H}" x2="{W + crop_off + crop_len}" y2="{H}" class="dieline"/>')
+    # Bottom left vertical (outward, +Y)
+    out.append(f'<line x1="0" y1="{0 - crop_off}" x2="0" y2="{-crop_off - crop_len}" class="dieline"/>')
+    # Bottom right vertical (outward, +Y)
+    out.append(f'<line x1="{W}" y1="{0 - crop_off}" x2="{W}" y2="{-crop_off - crop_len}" class="dieline"/>')
+    # Bottom right horizontal (outward, +X)
+    out.append(f'<line x1="{W + crop_off}" y1="0" x2="{W + crop_off + crop_len}" y2="0" class="dieline"/>')
+    out.append('</g>')
+
     out.append('</svg>')
     return "\n".join(out)
-
 
 # ---------------------------------------------------
 # Streamlit Execution
