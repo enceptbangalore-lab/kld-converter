@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 
 st.set_page_config(page_title="KLD Excel → SVG Generator (Grey-detect, Seals)", layout="wide")
 st.title("📏 KLD Excel → SVG Generator (Grey-detect + Seals)")
-st.caption("Detects grey header region (any filled cell != white), extracts header, and generates SVG dieline.")
+st.caption("Detects grey header region (any filled cell != white), extracts header until numeric table, and generates SVG dieline.")
 
 # ------------------------
 # Helpers
@@ -74,7 +74,7 @@ def cell_is_filled(cell):
 def extract_kld_data_from_bytes(xl_bytes):
     """
     Input: bytes of xlsx file
-    Returns dict with job_name, dimension_text, width_mm, cut_length_mm, top_seq, side_seq (CSV strings)
+    Returns dict with job_name, header_lines (list), dimension_text, width_mm, cut_length_mm, top_seq, side_seq (CSV strings)
     """
     bytes_io = io.BytesIO(xl_bytes)
 
@@ -85,7 +85,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     except Exception as e:
         raise RuntimeError(f"openpyxl failed to load workbook: {e}")
 
-    # find filled cells across sheet (Option A)
+    # find filled cells (Option A)
     filled_positions = []
     for r in range(1, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
@@ -100,44 +100,70 @@ def extract_kld_data_from_bytes(xl_bytes):
         r_min, r_max = min(rows), max(rows)
         c_min, c_max = min(cols), max(cols)
     else:
-        # fallback to a sensible default region (B2:AB68)
+        # fallback region B2:AB68
         r_min, r_max, c_min, c_max = 2, 68, 2, 28
         r_max = min(r_max, ws.max_row)
         c_max = min(c_max, ws.max_column)
 
-    # collect text lines from the bounding rectangle (row-wise)
+    # collect header lines from bounding rectangle ROW-WISE
+    # Stop when the first numeric row (>=3 numeric cells) is encountered
     header_lines = []
+    detected_dim_line = ""
+    detected_width = 0
+    detected_cut = 0
+
     for r in range(r_min, r_max + 1):
-        row_vals = []
+        # compute numeric count in this row (within bounding cols)
+        numeric_count = 0
+        row_texts = []
         for c in range(c_min, c_max + 1):
             val = ws.cell(row=r, column=c).value
             if val is None:
                 continue
-            s = str(val).strip()
-            if s:
-                row_vals.append(s)
-        line_text = " ".join(row_vals).strip()
-        if line_text:
-            header_lines.append(line_text)
+            sval = str(val).strip()
+            if sval == "":
+                continue
+            # count numeric-looking cells
+            if re.match(r"^-?\d+(\.\d+)?$", sval):
+                numeric_count += 1
+            row_texts.append(sval)
+        # If numeric row (>=3 numeric values), stop header collection
+        if numeric_count >= 3:
+            # try to detect dimension pair in this row (if any)
+            joined = " ".join(row_texts)
+            wtmp,ctmp = first_pair_from_text(joined)
+            if wtmp and ctmp:
+                detected_width = wtmp
+                detected_cut = ctmp
+            break
+        # else treat row as header (if it contains any text)
+        joined_text = " ".join(row_texts).strip()
+        if joined_text:
+            header_lines.append(joined_text)
+            # detect dimension line among header rows too
+            if not detected_dim_line and re.search(r"dimension|width|cut", joined_text, re.IGNORECASE):
+                detected_dim_line = joined_text
 
-    # job_name = first alphabetic line in header_lines
-    job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
-
-    # dimension line: find first with 'dimension' or width/cut pair
-    dim_line = next((ln for ln in header_lines if re.search(r"dimension|width|cut", ln, re.IGNORECASE)), "")
-    if not dim_line:
+    # fallback for dimension: if detected_dim_line empty, check detected_width/detected_cut
+    if detected_dim_line:
+        w_val, c_val = first_pair_from_text(detected_dim_line)
+    elif detected_width and detected_cut:
+        w_val, c_val = detected_width, detected_cut
+    else:
+        # look through header_lines for any pair
+        w_val, c_val = (0, 0)
         for ln in header_lines:
-            w,c = first_pair_from_text(ln)
-            if w and c:
-                dim_line = ln
+            wtmp, ctmp = first_pair_from_text(ln)
+            if wtmp and ctmp:
+                w_val, c_val = wtmp, ctmp
                 break
 
-    w_val, c_val = (0, 0)
-    if dim_line:
-        w_val, c_val = first_pair_from_text(dim_line)
     width_mm = int(w_val) if w_val else 0
     cut_length_mm = int(c_val) if c_val else 0
     dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
+
+    # derive job_name: first alphabetic header line
+    job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
 
     # =================================================
     # Now load into pandas to detect numeric table & sequences
@@ -152,7 +178,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     df = df.fillna("").astype(str)
     df = df[df.apply(lambda r: any(str(x).strip() for x in r), axis=1)].reset_index(drop=True)
 
-    # find numeric table start row heuristically
+    # find numeric table start row heuristically (global scan)
     start_row = 0
     for i in range(min(120, len(df))):
         row = df.iloc[i].tolist()
@@ -176,7 +202,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     # side_seq: find contiguous column subsequence that sums to width_mm
     side_seq_nums = []
     best_diff = float("inf")
-    W = width_mm
+    Wtarget = width_mm
     for c in df_num.columns:
         nums = clean_numeric_list(df_num[c].tolist())
         n = len(nums)
@@ -187,7 +213,7 @@ def extract_kld_data_from_bytes(xl_bytes):
             for j in range(i, n):
                 s += nums[j]
                 if j - i + 1 >= 3:
-                    diff = abs(s - W) if W else s
+                    diff = abs(s - Wtarget) if Wtarget else s
                     if diff < best_diff:
                         best_diff = diff
                         side_seq_nums = nums[i:j+1]
@@ -200,6 +226,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     return {
         "job_name": job_name,
+        "header_lines": header_lines,
         "dimension_text": dimension_text,
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
@@ -210,7 +237,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 # ------------------------
 # SVG generator (complete)
 # ------------------------
-def make_svg(data):
+def make_svg(data, line_spacing_mm=5.0):
     def parse_seq(src):
         if not src:
             return []
@@ -225,6 +252,7 @@ def make_svg(data):
     top_seq = parse_seq(data.get("top_seq"))
     side_seq = parse_seq(data.get("side_seq"))
     job_name = data.get("job_name", "KLD Layout")
+    header_lines = data.get("header_lines", [])
     dimension_text = data.get("dimension_text", f"Dimension ( Width * Cut-off length ) : {int(W)} * {int(H)} ( in mm )")
 
     # Artboard expansion
@@ -236,7 +264,7 @@ def make_svg(data):
     # Styles
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_mm = 1.5           # equals approx 8pt in Illustrator scale we used earlier
+    font_mm = 1.5           # approx 8pt visual in Illustrator
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
@@ -252,14 +280,16 @@ def make_svg(data):
     out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Header block (4 lines) centered horizontally at top (Y=0)
+    # Header block: use header_lines extracted (all lines above numeric table)
     header_y = 0.0
-    line_gap = font_mm + 1.5
     center_x = canvas_W / 2.0
-    header_lines = [job_name, dimension_text, "", ""]
     out.append('<g id="HeaderBlock">')
+    # if header_lines empty, fallback to job_name + dimension_text
+    if not header_lines:
+        header_lines = [job_name, dimension_text]
     for i, line in enumerate(header_lines):
-        out.append(f'<text x="{center_x}" y="{header_y + (i+1)*line_gap}" text-anchor="middle" class="text">{line}</text>')
+        y = header_y + (i + 1) * line_spacing_mm
+        out.append(f'<text x="{center_x}" y="{y}" text-anchor="middle" class="text">{line}</text>')
     out.append('</g>')
 
     # Outer dieline rectangle (shifted by margin)
@@ -326,7 +356,10 @@ def make_svg(data):
     if top_seq and side_seq:
         max_top = max(top_seq)
         # index of first max_top
-        max_idx = next((i for i, v in enumerate(top_seq) if v == max_top), 0)
+        try:
+            max_idx = next((i for i, v in enumerate(top_seq) if v == max_top), 0)
+        except StopIteration:
+            max_idx = 0
         left_x = margin + sum(top_seq[:max_idx]) if max_idx > 0 else margin
         skip = 2
         while skip < len(side_seq):
@@ -378,7 +411,29 @@ if uploaded_file:
     try:
         raw = uploaded_file.read()
         data = extract_kld_data_from_bytes(raw)
-        svg = make_svg(data)
+
+        # parse sequences for validation
+        def parse_seq_list(src):
+            if not src:
+                return []
+            parts = re.split(r"[,;|]", str(src))
+            return [float(p.strip()) for p in parts if re.match(r"^\d+(\.\d+)?$", p.strip())]
+
+        top_seq = parse_seq_list(data.get("top_seq"))
+        side_seq = parse_seq_list(data.get("side_seq"))
+        cut_length_mm = data.get("cut_length_mm") or 0
+        width_mm = data.get("width_mm") or 0
+
+        sum_top = sum(top_seq) if top_seq else 0
+        sum_side = sum(side_seq) if side_seq else 0
+
+        # validation warnings (Option A: show warning but still allow download)
+        if cut_length_mm and sum_top and sum_top != float(cut_length_mm):
+            st.warning(f"⚠️ Sum of top_seq ({sum_top}) does NOT match cut_length_mm ({cut_length_mm}). Please verify the Excel.")
+        if width_mm and sum_side and sum_side != float(width_mm):
+            st.warning(f"⚠️ Sum of side_seq ({sum_side}) does NOT match width_mm ({width_mm}). Please verify the Excel.")
+
+        svg = make_svg(data, line_spacing_mm=5.0)
         st.success("✅ Processed successfully.")
         st.download_button("⬇️ Download SVG File", svg, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
         st.code(f"side_seq: {data['side_seq']}\ntop_seq: {data['top_seq']}", language="text")
