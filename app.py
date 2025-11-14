@@ -156,6 +156,27 @@ def make_svg(data):
     out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
+    # --- KLD HEADER BLOCK (Top-left, 4 lines reserved) ---
+    header_x = margin
+    header_y = margin - 15   # position header above dieline but inside artboard
+    line_gap = font_mm + 1.5
+
+    header_lines = [
+        data.get("job_name", ""),
+        f"Dimension ( Width * Cut-off length ) : {int(W)} * {int(H)} ( in mm )",
+        "",   # reserved empty line
+        ""    # reserved empty line
+    ]
+
+    out.append('<g id="KLDHeader">')
+    for i, text_line in enumerate(header_lines):
+        out.append(
+            f'<text x="{header_x}" y="{header_y + i * line_gap}" '
+            f'text-anchor="start" class="text">{text_line}</text>'
+        )
+    out.append('</g>')
+
+
     # --- Outer dieline ---
     out.append(f'<rect x="{margin}" y="{margin}" width="{W}" height="{H}" class="dieline"/>')
 
