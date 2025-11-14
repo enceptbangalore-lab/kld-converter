@@ -191,9 +191,26 @@ def make_svg(data):
 
     # --- Photocell Mark (TOP-RIGHT) ---
     photocell_w, photocell_h = 6, 12
-    pc_x = margin + W - photocell_w
-    pc_y = margin
+    pc_x = margin + W - photocell_w      # right edge aligned
+    pc_y = margin                        # top edge aligned
+
+    out.append('<g id="PhotocellMark">')
+
+    # Rectangle
     out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
+
+    # Diagonal small line
+    diag_x1 = pc_x + photocell_w
+    diag_y1 = pc_y
+    out.append(f'<line x1="{diag_x1}" y1="{diag_y1}" x2="{diag_x1 + 3}" y2="{diag_y1 - 3}" class="dieline"/>')
+
+    # Label text
+    label_x = diag_x1 + 2
+    label_y = diag_y1 - 4
+    out.append(f'<text x="{label_x}" y="{label_y}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
+
+    out.append('</g>')
+
 
     # --- Width Marker ---
     total_width = sum(side_seq)
