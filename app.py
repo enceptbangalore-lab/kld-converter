@@ -427,17 +427,42 @@ if uploaded_file:
         sum_top = sum(top_seq) if top_seq else 0
         sum_side = sum(side_seq) if side_seq else 0
 
-        # validation warnings (Option A: show warning but still allow download)
+                # --- Strict validation blocking download ---
+        errors = []
         if cut_length_mm and sum_top and sum_top != float(cut_length_mm):
-            st.warning(f"⚠️ Sum of top_seq ({sum_top}) does NOT match cut_length_mm ({cut_length_mm}). Please verify the Excel.")
-        if width_mm and sum_side and sum_side != float(width_mm):
-            st.warning(f"⚠️ Sum of side_seq ({sum_side}) does NOT match width_mm ({width_mm}). Please verify the Excel.")
+            errors.append(
+                f"Sum of top_seq = {sum_top} mm does NOT match cut_length_mm = {cut_length_mm} mm."
+            )
 
+        if width_mm and sum_side and sum_side != float(width_mm):
+            errors.append(
+                f"Sum of side_seq = {sum_side} mm does NOT match width_mm = {width_mm} mm."
+            )
+
+        # If ANY error → block SVG download
+        if errors:
+            st.error("❌ SVG generation blocked due to mismatched dimensions:")
+            for e in errors:
+                st.write(f"- {e}")
+            st.stop()   # ❗ stops the script, preventing SVG generation and download button
+
+        # --- If validation passed, generate SVG ---
         svg = make_svg(data, line_spacing_mm=5.0)
-        st.success("✅ Processed successfully.")
-        st.download_button("⬇️ Download SVG File", svg, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
-        st.code(f"side_seq: {data['side_seq']}\ntop_seq: {data['top_seq']}", language="text")
+        st.success("✅ Dimensions validated. No mismatches detected.")
+        st.download_button(
+            "⬇️ Download SVG File",
+            svg,
+            f"{uploaded_file.name}_layout.svg",
+            "image/svg+xml"
+        )
+        st.code(
+            f"side_seq: {data['side_seq']}\ntop_seq: {data['top_seq']}",
+            language="text"
+        )
+
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
+
 else:
     st.info("Please upload the Excel (.xlsx) file (not CSV) to use grey-detection.")
+
