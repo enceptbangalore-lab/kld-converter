@@ -344,6 +344,64 @@ def make_svg(data):
     out.append('</svg>')
     return "\n".join(out)
 
+    # --- Seal Labels (End Seal + Center Seal) ---
+    out.append('<g id="Seals">')
+
+    # ---------- END SEAL (LEFT) ----------
+    # vertically centered to total of side_seq
+    total_side = sum(side_seq) if side_seq else 0
+    mid_side = margin + total_side / 2
+
+    # horizontally centered to 1st index of top_seq
+    first_top = top_seq[0] if top_seq else 0
+    left_end_x = margin + first_top / 2
+
+    # rotated -90 degrees (anticlockwise)
+    out.append(
+        f'<text x="{left_end_x}" y="{mid_side}" '
+        f'text-anchor="middle" transform="rotate(-90 {left_end_x} {mid_side})" '
+        f'class="text">END SEAL</text>'
+    )
+
+    # ---------- END SEAL (RIGHT) ----------
+    # horizontally centered to last index of top_seq
+    last_top = top_seq[-1] if top_seq else 0
+    right_end_x = margin + W - last_top / 2
+
+    # rotated +90 degrees (clockwise)
+    out.append(
+        f'<text x="{right_end_x}" y="{mid_side}" '
+        f'text-anchor="middle" transform="rotate(90 {right_end_x} {mid_side})" '
+        f'class="text">END SEAL</text>'
+    )
+
+    # ---------- CENTER SEAL (TOP) ----------
+    # horizontally centered to sum(top_seq)
+    total_top = sum(top_seq) if top_seq else 0
+    mid_top_x = margin + total_top / 2
+
+    # vertically centered to first index of side_seq
+    first_side = side_seq[0] if side_seq else 0
+    top_center_y = margin + first_side / 2
+
+    out.append(
+        f'<text x="{mid_top_x}" y="{top_center_y}" '
+        f'text-anchor="middle" class="text">CENTER SEAL</text>'
+    )
+
+    # ---------- CENTER SEAL (BOTTOM) ----------
+    # vertically centered to last index of side_seq
+    last_side = side_seq[-1] if side_seq else 0
+    bottom_center_y = margin + total_side - last_side / 2
+
+    out.append(
+        f'<text x="{mid_top_x}" y="{bottom_center_y}" '
+        f'text-anchor="middle" class="text">CENTER SEAL</text>'
+    )
+
+    out.append('</g>')
+
+
 # ------------------------
 # Streamlit app
 # ------------------------
