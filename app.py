@@ -5,12 +5,12 @@ import re
 import io
 from openpyxl import load_workbook
 
-st.set_page_config(page_title="KLD Excel → SVG Generator (Grey-detect)", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Grey-detect header)")
+st.set_page_config(page_title="KLD Excel → SVG Generator (Grey-detect, Seals)", layout="wide")
+st.title("📏 KLD Excel → SVG Generator (Grey-detect + Seals)")
 st.caption("Detects grey header region (any filled cell != white), extracts header, and generates SVG dieline.")
 
 # ------------------------
-# Helper functions
+# Helpers
 # ------------------------
 def clean_numeric_list(seq):
     out = []
@@ -40,20 +40,20 @@ def auto_trim_to_target(values, target, tol=1.0):
     return vals
 
 # ------------------------
-# Grey detection helpers
+# Grey detection helpers (Option A: any filled color != white)
 # ------------------------
 def cell_is_filled(cell):
     """
-    Option A: treat any non-white filled cell as part of the grey header region.
-    We consider patternType != None/'none' as filled, or fgColor.rgb present and not white.
+    Treat any non-white fill as part of the header region.
+    Returns True for pattern fills or fgColor.rgb that is not white.
     """
     try:
         fl = getattr(cell, "fill", None)
         if not fl:
             return False
         patt = getattr(fl, "patternType", None)
+        # If pattern type exists and not 'none' it's filled
         if patt and str(patt).lower() != "none":
-            # patternType present -> treat as filled (covers solid fills)
             return True
         # fallback: check fgColor rgb if available and not white
         fg = getattr(fl, "fgColor", None)
@@ -61,31 +61,31 @@ def cell_is_filled(cell):
             rgb = getattr(fg, "rgb", None)
             if rgb:
                 rgb = str(rgb).upper()
-                # common white representations
-                if rgb not in ("FFFFFFFF", "00FFFFFF", "00000000", "FFFFFF", "00FFFFFF"):
+                # treat common white values as not-filled; anything else -> filled
+                if rgb not in ("FFFFFFFF", "00FFFFFF", "00000000", "FFFFFF"):
                     return True
         return False
     except Exception:
         return False
 
 # ------------------------
-# Extraction (uses openpyxl for grey detection + pandas for numeric table)
+# Excel parsing + sequence extraction
 # ------------------------
 def extract_kld_data_from_bytes(xl_bytes):
     """
-    Input: xl_bytes (bytes of XLSX/XLS file)
-    Returns dict with job_name, dimension_text, width_mm, cut_length_mm, top_seq (CSV string), side_seq (CSV string)
+    Input: bytes of xlsx file
+    Returns dict with job_name, dimension_text, width_mm, cut_length_mm, top_seq, side_seq (CSV strings)
     """
     bytes_io = io.BytesIO(xl_bytes)
 
-    # 1) load workbook with openpyxl to inspect fills
+    # load with openpyxl to inspect fills
     try:
         wb = load_workbook(bytes_io, data_only=True, read_only=False)
         ws = wb.active
     except Exception as e:
         raise RuntimeError(f"openpyxl failed to load workbook: {e}")
 
-    # scan entire sheet to find filled cells (Option A)
+    # find filled cells across sheet (Option A)
     filled_positions = []
     for r in range(1, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
@@ -93,21 +93,19 @@ def extract_kld_data_from_bytes(xl_bytes):
             if cell_is_filled(cell):
                 filled_positions.append((r, c))
 
-    # determine bounding rectangle of filled cells
+    # bounding rectangle of filled cells
     if filled_positions:
         rows = [r for r, _ in filled_positions]
         cols = [c for _, c in filled_positions]
         r_min, r_max = min(rows), max(rows)
         c_min, c_max = min(cols), max(cols)
     else:
-        # Fallback: if no filled cells detected, attempt to use the heuristic B2:AB68
-        # but we'll first try to fallback to scanning a limited header region
+        # fallback to a sensible default region (B2:AB68)
         r_min, r_max, c_min, c_max = 2, 68, 2, 28
-        # ensure within sheet bounds
         r_max = min(r_max, ws.max_row)
         c_max = min(c_max, ws.max_column)
 
-    # collect text lines from bounding rectangle: read row-wise and join non-empty cells in each row
+    # collect text lines from the bounding rectangle (row-wise)
     header_lines = []
     for r in range(r_min, r_max + 1):
         row_vals = []
@@ -122,14 +120,14 @@ def extract_kld_data_from_bytes(xl_bytes):
         if line_text:
             header_lines.append(line_text)
 
-    # derive job_name (first alphabetic line) and dimension line (first containing dimension or a pair)
+    # job_name = first alphabetic line in header_lines
     job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
-    # find explicit dimension line
+
+    # dimension line: find first with 'dimension' or width/cut pair
     dim_line = next((ln for ln in header_lines if re.search(r"dimension|width|cut", ln, re.IGNORECASE)), "")
     if not dim_line:
-        # fallback: try first_pair_from_text across header_lines
         for ln in header_lines:
-            w, c = first_pair_from_text(ln)
+            w,c = first_pair_from_text(ln)
             if w and c:
                 dim_line = ln
                 break
@@ -137,24 +135,26 @@ def extract_kld_data_from_bytes(xl_bytes):
     w_val, c_val = (0, 0)
     if dim_line:
         w_val, c_val = first_pair_from_text(dim_line)
-    # fallback to 0 if not found
     width_mm = int(w_val) if w_val else 0
     cut_length_mm = int(c_val) if c_val else 0
     dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
 
-    # 2) Use pandas to load sheet into DataFrame to find numeric table and sequences
+    # =================================================
+    # Now load into pandas to detect numeric table & sequences
+    # =================================================
     bytes_io.seek(0)
     try:
         df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
     except Exception as e:
-        raise RuntimeError(f"pandas/read_excel failed: {e}")
+        raise RuntimeError(f"pandas.read_excel failed: {e}")
 
-    # Clean df and find numeric table start (same heuristic as earlier)
+    # clean df
     df = df.fillna("").astype(str)
     df = df[df.apply(lambda r: any(str(x).strip() for x in r), axis=1)].reset_index(drop=True)
 
+    # find numeric table start row heuristically
     start_row = 0
-    for i in range(min(80, len(df))):
+    for i in range(min(120, len(df))):
         row = df.iloc[i].tolist()
         numeric_count = sum(1 for c in row if re.match(r"^\d+(\.\d+)?$", str(c).strip()))
         if numeric_count >= 3:
@@ -163,7 +163,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     df_num = df.iloc[start_row:].reset_index(drop=True)
 
-    # find top sequence (row-wise) - matches cut_length_mm
+    # top_seq: pick best row (row with numbers matching cut_length_mm)
     top_seq_nums = []
     best_diff = float("inf")
     for i in range(len(df_num)):
@@ -173,7 +173,7 @@ def extract_kld_data_from_bytes(xl_bytes):
             if diff < best_diff:
                 best_diff, top_seq_nums = diff, nums
 
-    # find side sequence (contiguous column subsequence that matches width_mm)
+    # side_seq: find contiguous column subsequence that sums to width_mm
     side_seq_nums = []
     best_diff = float("inf")
     W = width_mm
@@ -195,9 +195,8 @@ def extract_kld_data_from_bytes(xl_bytes):
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
-    # string versions
-    top_seq_str = ",".join(str(int(v)) if v.is_integer() else str(v) for v in top_seq_trimmed)
-    side_seq_str = ",".join(str(int(v)) if v.is_integer() else str(v) for v in side_seq_trimmed)
+    top_seq_str = ",".join(str(int(v)) if float(v).is_integer() else str(v) for v in top_seq_trimmed)
+    side_seq_str = ",".join(str(int(v)) if float(v).is_integer() else str(v) for v in side_seq_trimmed)
 
     return {
         "job_name": job_name,
@@ -209,7 +208,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     }
 
 # ------------------------
-# SVG generator
+# SVG generator (complete)
 # ------------------------
 def make_svg(data):
     def parse_seq(src):
@@ -220,6 +219,7 @@ def make_svg(data):
         parts = re.split(r"[,;|]", str(src))
         return [float(p.strip()) for p in parts if re.match(r"^\d+(\.\d+)?$", p.strip())]
 
+    # Read inputs
     W = float(data.get("cut_length_mm") or 0)
     H = float(data.get("width_mm") or 0)
     top_seq = parse_seq(data.get("top_seq"))
@@ -227,16 +227,16 @@ def make_svg(data):
     job_name = data.get("job_name", "KLD Layout")
     dimension_text = data.get("dimension_text", f"Dimension ( Width * Cut-off length ) : {int(W)} * {int(H)} ( in mm )")
 
-    # artboard expansion + margin
+    # Artboard expansion
     extra = 60.0
     margin = extra / 2.0
     canvas_W = W + extra
     canvas_H = H + extra
 
-    # style
+    # Styles
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_mm = 1.5
+    font_mm = 1.5           # equals approx 8pt in Illustrator scale we used earlier
     tick_short = 5.0
     top_shift_up = 5.0
     left_shift_left = 5.0
@@ -253,25 +253,23 @@ def make_svg(data):
     out.append(']]></style></defs>')
 
     # Header block (4 lines) centered horizontally at top (Y=0)
-    header_y = 0
+    header_y = 0.0
     line_gap = font_mm + 1.5
     center_x = canvas_W / 2.0
     header_lines = [job_name, dimension_text, "", ""]
     out.append('<g id="HeaderBlock">')
     for i, line in enumerate(header_lines):
-        # place lines starting at small offset so they sit inside artboard top
         out.append(f'<text x="{center_x}" y="{header_y + (i+1)*line_gap}" text-anchor="middle" class="text">{line}</text>')
     out.append('</g>')
 
     # Outer dieline rectangle (shifted by margin)
     out.append(f'<rect x="{margin}" y="{margin}" width="{W}" height="{H}" class="dieline"/>')
 
-    # Measurements group (ticks + texts)
+    # Measurements group
     out.append('<g id="Measurements">')
 
-    # TOP ticks + texts (top texts moved down by top_text_shift_down)
+    # TOP ticks & labels
     x = 0.0
-    # initial zero tick
     out.append(f'<line x1="{margin}" y1="{margin - top_shift_up}" x2="{margin}" y2="{margin - top_shift_up - tick_short}" class="dieline"/>')
     for v in top_seq:
         x += v
@@ -279,7 +277,7 @@ def make_svg(data):
         mid = x - v / 2.0
         out.append(f'<text x="{margin + mid}" y="{margin - top_shift_up - tick_short - 1 + top_text_shift_down}" text-anchor="middle" class="text">{int(v)}</text>')
 
-    # LEFT ticks + texts (left texts moved right by left_text_shift_right)
+    # LEFT ticks & labels
     y = 0.0
     out.append(f'<line x1="{margin - left_shift_left}" y1="{margin}" x2="{margin - left_shift_left - tick_short}" y2="{margin}" class="dieline"/>')
     for v in side_seq:
@@ -290,7 +288,7 @@ def make_svg(data):
         out.append(f'<text x="{lx}" y="{margin + midY}" transform="rotate(-90 {lx} {margin + midY})" text-anchor="middle" class="text">{int(v)}</text>')
     out.append('</g>')
 
-    # Crop marks (top-right and bottom-right outward marks)
+    # Crop marks (right side outward marks)
     out.append('<g id="CropMarks">')
     out.append(f'<line x1="{margin + W + crop_off}" y1="{margin + H}" x2="{margin + W + crop_off + crop_len}" y2="{margin + H}" class="dieline"/>')
     out.append(f'<line x1="{margin + W + crop_off}" y1="{margin}" x2="{margin + W + crop_off + crop_len}" y2="{margin}" class="dieline"/>')
@@ -302,18 +300,16 @@ def make_svg(data):
     pc_y = margin
     out.append('<g id="PhotocellMark">')
     out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
-    diag_x1 = pc_x + photocell_w
-    diag_y1 = pc_y
-    out.append(f'<line x1="{diag_x1}" y1="{diag_y1}" x2="{diag_x1 + 3}" y2="{diag_y1 - 3}" class="dieline"/>')
-    out.append(f'<text x="{diag_x1 + 2}" y="{diag_y1 - 4}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
+    out.append(f'<line x1="{pc_x + photocell_w}" y1="{pc_y}" x2="{pc_x + photocell_w + 3}" y2="{pc_y - 3}" class="dieline"/>')
+    out.append(f'<text x="{pc_x + photocell_w + 2}" y="{pc_y - 4}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
     out.append('</g>')
 
-    # Width indicator (vertical) and label (rotated -90 and offset right 6mm)
+    # Width indicator (vertical) and label
     total_width = sum(side_seq) if side_seq else 0
     width_line_x = pc_x + photocell_w + 4
+    midY = margin + total_width / 2.0 if total_width else margin
     out.append('<g id="WidthMarker">')
     out.append(f'<line x1="{width_line_x}" y1="{margin}" x2="{width_line_x}" y2="{margin + total_width}" class="dieline"/>')
-    midY = margin + (total_width / 2.0) if total_width else margin
     out.append(f'<text x="{width_line_x + 6}" y="{midY}" transform="rotate(-90 {width_line_x + 6} {midY})" text-anchor="middle" class="text">width = {int(total_width)} mm</text>')
     out.append('</g>')
 
@@ -325,11 +321,11 @@ def make_svg(data):
     out.append(f'<text x="{margin + total_height/2.0}" y="{height_y + 6}" text-anchor="middle" class="text">height = {int(total_height)} mm</text>')
     out.append('</g>')
 
-    # Dynamic boxes (width = max(top_seq), left aligned to sum of top_seq before max)
+    # Dynamic boxes (width = max(top_seq))
     out.append('<g id="DynamicBoxes">')
     if top_seq and side_seq:
         max_top = max(top_seq)
-        # first index of max_top
+        # index of first max_top
         max_idx = next((i for i, v in enumerate(top_seq) if v == max_top), 0)
         left_x = margin + sum(top_seq[:max_idx]) if max_idx > 0 else margin
         skip = 2
@@ -341,66 +337,37 @@ def make_svg(data):
             skip += 3
     out.append('</g>')
 
-    out.append('</svg>')
-    return "\n".join(out)
-
-    # --- Seal Labels (End Seal + Center Seal) ---
+    # Seal labels (End Seal left/right, Center Seal top/bottom)
     out.append('<g id="Seals">')
-
-    # ---------- END SEAL (LEFT) ----------
-    # vertically centered to total of side_seq
     total_side = sum(side_seq) if side_seq else 0
-    mid_side = margin + total_side / 2
+    mid_side = margin + total_side / 2.0
 
-    # horizontally centered to 1st index of top_seq
+    # Left END SEAL - horizontally centered to 1st top_seq index
     first_top = top_seq[0] if top_seq else 0
-    left_end_x = margin + first_top / 2
+    left_end_x = margin + first_top / 2.0
+    out.append(f'<text x="{left_end_x}" y="{mid_side}" transform="rotate(-90 {left_end_x} {mid_side})" text-anchor="middle" class="text">END SEAL</text>')
 
-    # rotated -90 degrees (anticlockwise)
-    out.append(
-        f'<text x="{left_end_x}" y="{mid_side}" '
-        f'text-anchor="middle" transform="rotate(-90 {left_end_x} {mid_side})" '
-        f'class="text">END SEAL</text>'
-    )
-
-    # ---------- END SEAL (RIGHT) ----------
-    # horizontally centered to last index of top_seq
+    # Right END SEAL - horizontally centered to last top_seq index
     last_top = top_seq[-1] if top_seq else 0
-    right_end_x = margin + W - last_top / 2
+    right_end_x = margin + W - last_top / 2.0
+    out.append(f'<text x="{right_end_x}" y="{mid_side}" transform="rotate(90 {right_end_x} {mid_side})" text-anchor="middle" class="text">END SEAL</text>')
 
-    # rotated +90 degrees (clockwise)
-    out.append(
-        f'<text x="{right_end_x}" y="{mid_side}" '
-        f'text-anchor="middle" transform="rotate(90 {right_end_x} {mid_side})" '
-        f'class="text">END SEAL</text>'
-    )
-
-    # ---------- CENTER SEAL (TOP) ----------
-    # horizontally centered to sum(top_seq)
+    # Centre Seal - top (horiz centered to sum(top_seq), vertically center to first side_seq)
     total_top = sum(top_seq) if top_seq else 0
-    mid_top_x = margin + total_top / 2
-
-    # vertically centered to first index of side_seq
+    mid_top_x = margin + total_top / 2.0
     first_side = side_seq[0] if side_seq else 0
-    top_center_y = margin + first_side / 2
+    top_center_y = margin + first_side / 2.0
+    out.append(f'<text x="{mid_top_x}" y="{top_center_y}" text-anchor="middle" class="text">CENTER SEAL</text>')
 
-    out.append(
-        f'<text x="{mid_top_x}" y="{top_center_y}" '
-        f'text-anchor="middle" class="text">CENTER SEAL</text>'
-    )
-
-    # ---------- CENTER SEAL (BOTTOM) ----------
-    # vertically centered to last index of side_seq
+    # Centre Seal - bottom (horiz centered same as top, vertically center to last side_seq)
     last_side = side_seq[-1] if side_seq else 0
-    bottom_center_y = margin + total_side - last_side / 2
-
-    out.append(
-        f'<text x="{mid_top_x}" y="{bottom_center_y}" '
-        f'text-anchor="middle" class="text">CENTER SEAL</text>'
-    )
-
+    bottom_center_y = margin + total_side - last_side / 2.0
+    out.append(f'<text x="{mid_top_x}" y="{bottom_center_y}" text-anchor="middle" class="text">CENTER SEAL</text>')
     out.append('</g>')
 
+    # End SVG
+    out.append('</svg>')
+    return "\n".join(out)
 
 # ------------------------
 # Streamlit app
@@ -410,12 +377,11 @@ uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 if uploaded_file:
     try:
         raw = uploaded_file.read()
-        # extract data
         data = extract_kld_data_from_bytes(raw)
         svg = make_svg(data)
         st.success("✅ Processed successfully.")
         st.download_button("⬇️ Download SVG File", svg, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
-        st.code(f"side_seq: {data['side_seq']}", language="text")
+        st.code(f"side_seq: {data['side_seq']}\ntop_seq: {data['top_seq']}", language="text")
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
 else:
