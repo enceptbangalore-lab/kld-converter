@@ -48,29 +48,42 @@ def auto_trim_to_target(values, target, tol=1.0):
 # ===========================================
 
 def cell_is_filled(cell):
-    """Return True only if the cell has a real non-white RGB fill color."""
+    """Return True if a cell has a visible non-white fill.
+
+    Rules (Option 1):
+    - patternType must not be None or 'none'
+    - if fgColor.rgb exists, treat non-white rgb as filled
+    - if rgb missing but indexed/theme present, treat as filled (conservative)
+    """
     try:
-        fg = cell.fill.fgColor
+        fl = getattr(cell, "fill", None)
+        if not fl:
+            return False
+
+        patt = getattr(fl, "patternType", None)
+        if patt is None or str(patt).lower() == "none":
+            return False
+
+        fg = getattr(fl, "fgColor", None)
         if not fg:
             return False
 
-        # Must have an explicit RGB value
-        if fg.rgb:
-            rgb = fg.rgb.upper()
-
-            # White → NOT grey
+        rgb = getattr(fg, "rgb", None)
+        if rgb:
+            rgb = str(rgb).upper()
+            # Exclude pure white variants
             if rgb in ("FFFFFFFF", "FFFFFF", "00FFFFFF"):
                 return False
-
-            # Any other RGB → this is real color (grey/black/etc.)
             return True
 
-        # If RGB is missing (theme/indexed fill) → treat as NOT grey
+        # If rgb not set, but there's indexed/theme/tint info, assume colored
+        if getattr(fg, "indexed", None) is not None or getattr(fg, "theme", None) is not None:
+            return True
+
         return False
 
-    except:
+    except Exception:
         return False
-
 
 
 # ===========================================
