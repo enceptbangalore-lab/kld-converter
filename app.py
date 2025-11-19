@@ -31,7 +31,7 @@ def first_pair_from_text(text):
     text = str(text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*[*xX]\s*(\d+(?:\.\d+)?)", text)
     if m:
-        return int(float(m.group(1))), int(float(m.group(2)))
+        return float(m.group(1)), float(m.group(2))
     return 0, 0
 
 
@@ -187,8 +187,8 @@ def extract_kld_data_from_bytes(xl_bytes):
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
-    top_seq_str = ",".join(str(int(v)) for v in top_seq_trimmed)
-    side_seq_str = ",".join(str(int(v)) for v in side_seq_trimmed)
+    top_seq_str = ",".join(str(v).rstrip('0').rstrip('.') for v in top_seq_trimmed)
+    side_seq_str = ",".join(str(v).rstrip('0').rstrip('.') for v in side_seq_trimmed)
 
     return {
         "job_name": job_name,
@@ -264,7 +264,7 @@ def make_svg(data, line_spacing_mm=5.0):
         x += v
         out.append(f'<line x1="{margin+x}" y1="{margin-top_shift_up}" x2="{margin+x}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
         mid = x - v / 2
-        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" text-anchor="middle" class="text">{round(v, 2)}</text>')
 
     y = 0
     out.append(f'<line x1="{margin-left_shift_left}" y1="{margin}" x2="{margin-left_shift_left-tick_short}" y2="{margin}" class="dieline"/>')
