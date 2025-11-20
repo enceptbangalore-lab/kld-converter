@@ -285,7 +285,7 @@ def make_svg(data, line_spacing_mm=5.0):
     canvas_H = H + extra
 
     dieline = "#92278f"
-    stroke_pt = 0.356
+    stroke_pt = 0.190
     font_mm = 0.8
     tick_short = 5
     top_shift_up = 5
