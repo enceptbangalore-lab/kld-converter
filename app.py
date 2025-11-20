@@ -165,9 +165,18 @@ def extract_kld_data_from_bytes(xl_bytes):
             # numeric table begins here — stop collecting header
             break
 
-        line_text = " ".join(row_vals).strip()
-        if line_text:
-            header_lines.append(line_text)
+        # ---------------------------------------------
+        # STRICT HEADER FILTER (per required logic)
+        # ---------------------------------------------
+        text_tokens = [
+            sval for sval in row_vals
+            if re.search(r"[A-Za-z]", sval)
+            and not re.match(r"^-?\d+(?:\.\d+)?$", sval)
+            and not sval.startswith("=")
+        ]
+
+        if len(text_tokens) >= 2 and numeric_count == 0:
+            header_lines.append(" ".join(text_tokens))
             if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
                 detected_dim_line = line_text
 
