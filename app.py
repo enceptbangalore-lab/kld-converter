@@ -176,8 +176,9 @@ def extract_kld_data_from_bytes(xl_bytes):
         ]
 
         if len(text_tokens) >= 2 and numeric_count == 0:
-            header_lines.append(" ".join(text_tokens))
-            if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
+            merged = " ".join(text_tokens)
+            header_lines.append(merged)
+            if not detected_dim_line and re.search(r"dimension|width|cut", merged, re.IGNORECASE):
                 detected_dim_line = line_text
 
     # Dimension extraction
