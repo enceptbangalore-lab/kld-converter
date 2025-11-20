@@ -244,7 +244,15 @@ def make_svg(data, line_spacing_mm=5.0):
     canvas_W = W + extra
     canvas_H = H + extra
 
-    dieline = "#92278f"
+    # Spot colour definition (CMYK, name: Dieline)
+    spot_color_def = """
+    <defs>
+          <icc-color-profile name="Dieline" xlink:href="data:application/vnd.iccprofile;base64,">
+          </icc-color-profile>
+    </defs>
+    """
+
+    dieline = "icc-color(Dieline, 0.5, 1, 0, 0)"
     stroke_pt = 0.356
     font_mm = 1.5
     tick_short = 5
@@ -258,8 +266,8 @@ def make_svg(data, line_spacing_mm=5.0):
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_W}mm" height="{canvas_H}mm" viewBox="0 0 {canvas_W} {canvas_H}">')
     out.append('<defs><style><![CDATA[')
-    out.append(f'.dieline{{stroke:{dieline};stroke-width:{stroke_pt}pt;fill:none;}}')
-    out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
+    out.append(f'.dieline{{stroke:icc-color(Dieline, 0.5, 1, 0, 0);stroke-width:{stroke_pt}pt;fill:none;}}')
+    out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:icc-color(Dieline, 0.5, 1, 0, 0);}}')
     out.append(']]></style></defs>')
 
     # Header
