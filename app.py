@@ -1,17 +1,15 @@
-# app.py
+# app.py — rebuilt: robust header extraction, preserved sequences
 import streamlit as st
 import pandas as pd
 import re
 import io
 from openpyxl import load_workbook
 
-st.set_page_config(page_title="KLD Excel → SVG Generator (Grey-detect, Seals)", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Grey-detect + Seals + Strict Validation)")
-st.caption("Detects grey header region, extracts header until numeric table, applies strict dimension validation, and generates SVG dieline.")
+st.set_page_config(page_title="KLD Excel → SVG Generator (Robust)", layout="wide")
+st.title("📏 KLD Excel → SVG Generator (Robust Header Detection)")
+st.caption("Robust header extraction + preserved top/side logic. Shows extracted header for verification.")
 
-# ===========================================
-# Helpers
-# ===========================================
+# ------------------------- Helpers -------------------------
 
 def clean_numeric_list(seq):
     out = []
@@ -42,62 +40,33 @@ def auto_trim_to_target(values, target, tol=1.0):
         vals.pop()
     return vals
 
-
-# ===========================================
-# Grey detection — Option 1 (any non-white color counts)
-# ===========================================
+# ------------------------- Grey detection -------------------------
 
 def cell_is_filled(cell):
-    """Return True if a cell has a visible non-white fill.
-
-    Rules (Option 1):
-    - patternType must not be None or 'none'
-    - if fgColor.rgb exists, treat non-white rgb as filled
-    - if rgb missing but indexed/theme present, treat as filled (conservative)
-    """
+    """Return True only if cell has an explicit non-white RGB fill."""
     try:
-        fl = getattr(cell, "fill", None)
-        if not fl:
-            return False
-
-        patt = getattr(fl, "patternType", None)
-        if patt is None or str(patt).lower() == "none":
-            return False
-
-        fg = getattr(fl, "fgColor", None)
+        fg = cell.fill.fgColor
         if not fg:
             return False
-
         rgb = getattr(fg, "rgb", None)
         if rgb:
             rgb = str(rgb).upper()
-            # Exclude pure white variants
             if rgb in ("FFFFFFFF", "FFFFFF", "00FFFFFF"):
                 return False
             return True
-
-        # If rgb not set, but there's indexed/theme/tint info, assume colored
-        if getattr(fg, "indexed", None) is not None or getattr(fg, "theme", None) is not None:
-            return True
-
         return False
-
     except Exception:
         return False
 
-
-# ===========================================
-# Extraction
-# ===========================================
+# ------------------------- Extraction -------------------------
 
 def extract_kld_data_from_bytes(xl_bytes):
-
     bytes_io = io.BytesIO(xl_bytes)
 
-    # Load workbook for grey detection
     wb = load_workbook(bytes_io, data_only=True, read_only=False)
     ws = wb.active
 
+    # detect filled positions (used only as a fallback)
     filled_positions = []
     for r in range(1, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
@@ -105,68 +74,38 @@ def extract_kld_data_from_bytes(xl_bytes):
                 if cell_is_filled(ws.cell(r, c)):
                     filled_positions.append((r, c))
             except Exception:
-                # ignore odd cells
                 continue
 
-    # If no filled positions found, fallback to reasonable defaults
-    if filled_positions:
-        rows = [r for r, _ in filled_positions]
-        cols = [c for _, c in filled_positions]
-        r_min, r_max = min(rows), max(rows)
-        c_min, c_max = min(cols), max(cols)
-    else:
-        # fallback default region (keeps previous behavior)
-        r_min, r_max, c_min, c_max = 2, 68, 2, 28
-        r_max = min(r_max, ws.max_row)
-        c_max = min(c_max, ws.max_column)
-
-    # Build per-row grey column map (strict row-wise extraction)
-    grey_cols_by_row = {}
-    for r, c in filled_positions:
-        grey_cols_by_row.setdefault(r, set()).add(c)
-
-    # Collect header lines until numeric table begins — robust approach
-    # We\'ll detect numeric table start using pandas (reliable), then walk upwards
-    # and extract a contiguous header block centered on the main body (ignores right-side panels).
-
-    # Load into pandas early to find numeric table start (pandas row 0 == excel row 1)
+    # --- 1) Use pandas to reliably find numeric table start ---
     bytes_io.seek(0)
-    df_all = pd.read_excel(bytes_io, header=None, engine="openpyxl").fillna("").astype(str)
-    # compact rows that are not entirely empty
+    df_all = pd.read_excel(bytes_io, header=None, engine="openpyxl").fillna("")
     df_all = df_all[df_all.apply(lambda r: any(str(x).strip() for x in r), axis=1)].reset_index(drop=True)
 
-    # find numeric table start row index in dataframe (0-based)
     start_row = 0
     for i in range(min(120, len(df_all))):
-        numeric_count = sum(1 for c in df_all.iloc[i].tolist() if re.match(r"^\d+(?:\.\d+)?$", c.strip()))
+        numeric_count = sum(1 for c in df_all.iloc[i].tolist() if re.match(r"^\d+(?:\.\d+)?$", str(c).strip()))
         if numeric_count >= 3:
             start_row = i
             break
 
-    # Map dataframe row index to excel row number
-    # We read the whole sheet without skipping so df_all index 0 => excel row 1
-    table_start_excel_row = start_row + 1
+    table_start_excel = start_row + 1  # 1-based excel row
 
-    # Determine a reasonable scan window above the table to find header columns
-    max_scan_rows = min(table_start_excel_row - 1, 30)  # scan up to 30 rows or until top
-    scan_start_row = max(1, table_start_excel_row - max_scan_rows)
-    scan_end_row = table_start_excel_row - 1
+    # --- 2) Inspect a window above the table to find the main left block of columns ---
+    scan_window = min(30, table_start_excel - 1)
+    scan_start = max(1, table_start_excel - scan_window)
+    scan_end = table_start_excel - 1
 
-    # Count non-empty occurrences per column within the scan window to locate the main contiguous block
-    col_counts = [0] * (ws.max_column + 1)  # 1-based index
-    for r in range(scan_start_row, scan_end_row + 1):
+    col_counts = [0] * (ws.max_column + 1)
+    for r in range(scan_start, scan_end + 1):
         for c in range(1, ws.max_column + 1):
             v = ws.cell(r, c).value
-            if v is not None and str(v).strip() != "":
+            if v is not None and str(v).strip():
                 col_counts[c] += 1
 
-    # Build boolean mask of columns that have text at least once in scan window
-    col_mask = [False] * (ws.max_column + 1)
-    for c in range(1, ws.max_column + 1):
-        col_mask[c] = col_counts[c] > 0
+    col_mask = [col_counts[c] > 0 for c in range(len(col_counts))]
 
-    # Find longest contiguous True segment in col_mask (ignoring leading/trailing empties)
-    best_l, best_r, cur_l = 0, 0, None
+    best_l = best_r = 0
+    cur_l = None
     cur_len = 0
     for c in range(1, ws.max_column + 2):
         if c <= ws.max_column and col_mask[c]:
@@ -180,91 +119,68 @@ def extract_kld_data_from_bytes(xl_bytes):
                 cur_l = None
                 cur_len = 0
 
-    # If we didn\'t find a block, fallback to a central region near middle columns
     if best_l == 0 and best_r == 0:
         mid = max(1, ws.max_column // 2)
         best_l = max(1, mid - 6)
         best_r = min(ws.max_column, mid + 6)
 
-    # Now walk upward from the row immediately above table_start and collect header lines
+    # Trim the found block to favor left-side (user asked left block only)
+    # if the block is wide and its center is right of mid, shift leftwards
+    mid_col = ws.max_column // 2
+    if (best_l + best_r) // 2 > mid_col:
+        # prefer a left-biased block of width up to current width
+        width = best_r - best_l + 1
+        best_r = min(ws.max_column, best_l + max(6, width) - 1)
+
+    # --- 3) Walk upward from table_start and collect header lines from [best_l..best_r] ---
     header_lines = []
     detected_dim_line = ""
-    consecutive_blank = 0
+    blank_rows = 0
 
-    for r in range(scan_end_row, scan_start_row - 1, -1):
-        # Collect text only from the main contiguous column block [best_l..best_r]
+    for r in range(scan_end, scan_start - 1, -1):
         row_vals = []
         numeric_count = 0
         for c in range(best_l, best_r + 1):
-            try:
-                val = ws.cell(r, c).value
-            except Exception:
-                val = None
+            val = ws.cell(r, c).value
             if val is None:
                 continue
             sval = str(val).strip()
-            if sval == "":
+            if not sval:
                 continue
             if re.match(r"^-?\d+(?:\.\d+)?$", sval):
                 numeric_count += 1
             row_vals.append(sval)
 
         if not row_vals:
-            consecutive_blank += 1
-            # stop when we get two consecutive blank rows above header area
-            if consecutive_blank >= 2:
+            blank_rows += 1
+            if blank_rows >= 2:
                 break
-            else:
-                continue
+            continue
         else:
-            consecutive_blank = 0
+            blank_rows = 0
 
-        # if numeric-like row appears in the header area, treat it as table start and stop
         if numeric_count >= 3:
             break
 
-        # prepend because we\'re iterating upwards; we\'ll reverse later
-        line_text = " ".join(row_vals).strip()
-        if line_text:
-            header_lines.insert(0, line_text)
-            if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
-                detected_dim_line = line_text
+        line = " ".join(row_vals)
+        header_lines.insert(0, line)
+        if not detected_dim_line and re.search(r"dimension|width|cut", line, re.IGNORECASE):
+            detected_dim_line = line
 
-    # If header_lines still empty, fall back to previous conservative method using grey columns
-    if not header_lines:
-        # Build per-row grey column map
-        grey_cols_by_row = {}
-        for r, c in filled_positions:
-            grey_cols_by_row.setdefault(r, set()).add(c)
-
-        # scan a small range near top of sheet for any textual header
-        for r in range(1, min(20, ws.max_row) + 1):
-            row_vals = []
-            numeric_count = 0
-            cols = sorted(grey_cols_by_row.get(r, list(range(1, min(ws.max_column, 30) + 1))))
-            for c in cols:
-                val = ws.cell(r, c).value
-                if val is None:
-                    continue
-                sval = str(val).strip()
-                if sval == "":
-                    continue
-                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                    numeric_count += 1
-                row_vals.append(sval)
-            if row_vals and numeric_count < 3:
-                header_lines.append(" ".join(row_vals).strip())
-                if not detected_dim_line and re.search(r"dimension|width|cut", header_lines[-1], re.IGNORECASE):
-                    detected_dim_line = header_lines[-1]
-
-    # Ensure header_lines are unique and trimmed
     header_lines = [ln.strip() for ln in header_lines if ln.strip()]
 
-# Dimension extraction
+    # Very small fallback: if header empty, use top-most non-numeric lines
+    if not header_lines:
+        for r in range(1, min(12, ws.max_row) + 1):
+            vals = [str(ws.cell(r, c).value).strip() for c in range(1, min(12, ws.max_column) + 1) if ws.cell(r, c).value]
+            if vals:
+                header_lines.append(" ".join(vals))
+
+    # --- 4) Dimension extraction ---
     if detected_dim_line:
         w_val, c_val = first_pair_from_text(detected_dim_line)
     else:
-        w_val, c_val = (0, 0)
+        w_val = c_val = 0
         for ln in header_lines:
             t1, t2 = first_pair_from_text(ln)
             if t1 and t2:
@@ -273,12 +189,10 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     width_mm = int(w_val) if w_val else 0
     cut_length_mm = int(c_val) if c_val else 0
-
     dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
-
     job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
 
-    # Load into pandas to extract numeric table (we need full sheet for numeric scanning)
+    # --- 5) ORIGINAL top/side sequence logic (preserved) ---
     bytes_io.seek(0)
     df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
     df = df.fillna("").astype(str)
@@ -293,7 +207,6 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     df_num = df.iloc[start_row:].reset_index(drop=True)
 
-    # Top sequence
     top_seq_nums = []
     best_diff = float("inf")
     for i in range(len(df_num)):
@@ -304,7 +217,6 @@ def extract_kld_data_from_bytes(xl_bytes):
                 best_diff = diff
                 top_seq_nums = nums
 
-    # Side sequence
     side_seq_nums = []
     best_diff = float("inf")
     for c in df_num.columns:
@@ -322,8 +234,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
-    # keep decimals, but remove trailing .0 where possible
-    def _fmt_list(vals):
+    def _fmt(vals):
         out = []
         for v in vals:
             s = str(v)
@@ -332,26 +243,20 @@ def extract_kld_data_from_bytes(xl_bytes):
             out.append(s)
         return out
 
-    top_seq_str = ",".join(_fmt_list(top_seq_trimmed))
-    side_seq_str = ",".join(_fmt_list(side_seq_trimmed))
-
     return {
         "job_name": job_name,
         "header_lines": header_lines,
         "dimension_text": dimension_text,
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
-        "top_seq": top_seq_str,
-        "side_seq": side_seq_str,
+        "top_seq": ",".join(_fmt(top_seq_trimmed)),
+        "side_seq": ",".join(_fmt(side_seq_trimmed)),
     }
 
 
-# ===========================================
-# SVG generator
-# ===========================================
+# ------------------------- SVG generator -------------------------
 
 def make_svg(data, line_spacing_mm=5.0):
-
     def parse_seq(src):
         if not src:
             return []
