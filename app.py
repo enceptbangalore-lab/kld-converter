@@ -125,27 +125,77 @@ def extract_kld_data_from_bytes(xl_bytes):
     for r, c in filled_positions:
         grey_cols_by_row.setdefault(r, set()).add(c)
 
-    # Collect header lines until numeric table begins — only using grey columns per row
+    # Collect header lines until numeric table begins — robust approach
+    # We\'ll detect numeric table start using pandas (reliable), then walk upwards
+    # and extract a contiguous header block centered on the main body (ignores right-side panels).
+
+    # Load into pandas early to find numeric table start (pandas row 0 == excel row 1)
+    bytes_io.seek(0)
+    df_all = pd.read_excel(bytes_io, header=None, engine="openpyxl").fillna("").astype(str)
+    # compact rows that are not entirely empty
+    df_all = df_all[df_all.apply(lambda r: any(str(x).strip() for x in r), axis=1)].reset_index(drop=True)
+
+    # find numeric table start row index in dataframe (0-based)
+    start_row = 0
+    for i in range(min(120, len(df_all))):
+        numeric_count = sum(1 for c in df_all.iloc[i].tolist() if re.match(r"^\d+(?:\.\d+)?$", c.strip()))
+        if numeric_count >= 3:
+            start_row = i
+            break
+
+    # Map dataframe row index to excel row number
+    # We read the whole sheet without skipping so df_all index 0 => excel row 1
+    table_start_excel_row = start_row + 1
+
+    # Determine a reasonable scan window above the table to find header columns
+    max_scan_rows = min(table_start_excel_row - 1, 30)  # scan up to 30 rows or until top
+    scan_start_row = max(1, table_start_excel_row - max_scan_rows)
+    scan_end_row = table_start_excel_row - 1
+
+    # Count non-empty occurrences per column within the scan window to locate the main contiguous block
+    col_counts = [0] * (ws.max_column + 1)  # 1-based index
+    for r in range(scan_start_row, scan_end_row + 1):
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(r, c).value
+            if v is not None and str(v).strip() != "":
+                col_counts[c] += 1
+
+    # Build boolean mask of columns that have text at least once in scan window
+    col_mask = [False] * (ws.max_column + 1)
+    for c in range(1, ws.max_column + 1):
+        col_mask[c] = col_counts[c] > 0
+
+    # Find longest contiguous True segment in col_mask (ignoring leading/trailing empties)
+    best_l, best_r, cur_l = 0, 0, None
+    cur_len = 0
+    for c in range(1, ws.max_column + 2):
+        if c <= ws.max_column and col_mask[c]:
+            if cur_l is None:
+                cur_l = c
+            cur_len += 1
+        else:
+            if cur_l is not None:
+                if cur_len > (best_r - best_l + 1):
+                    best_l, best_r = cur_l, c - 1
+                cur_l = None
+                cur_len = 0
+
+    # If we didn\'t find a block, fallback to a central region near middle columns
+    if best_l == 0 and best_r == 0:
+        mid = max(1, ws.max_column // 2)
+        best_l = max(1, mid - 6)
+        best_r = min(ws.max_column, mid + 6)
+
+    # Now walk upward from the row immediately above table_start and collect header lines
     header_lines = []
     detected_dim_line = ""
+    consecutive_blank = 0
 
-    if grey_cols_by_row:
-        rows_to_scan = sorted(r for r in grey_cols_by_row.keys() if r_min <= r <= r_max)
-    else:
-        # if nothing marked, fall back to scanning the default row range
-        rows_to_scan = list(range(r_min, r_max + 1))
-
-    for r in rows_to_scan:
+    for r in range(scan_end_row, scan_start_row - 1, -1):
+        # Collect text only from the main contiguous column block [best_l..best_r]
         row_vals = []
         numeric_count = 0
-
-        # If we have explicit grey cols for this row, use them; otherwise scan within c_min..c_max
-        if r in grey_cols_by_row:
-            cols = sorted(grey_cols_by_row[r])
-        else:
-            cols = list(range(c_min, c_max + 1))
-
-        for c in cols:
+        for c in range(best_l, best_r + 1):
             try:
                 val = ws.cell(r, c).value
             except Exception:
@@ -155,23 +205,62 @@ def extract_kld_data_from_bytes(xl_bytes):
             sval = str(val).strip()
             if sval == "":
                 continue
-
             if re.match(r"^-?\d+(?:\.\d+)?$", sval):
                 numeric_count += 1
-
             row_vals.append(sval)
 
+        if not row_vals:
+            consecutive_blank += 1
+            # stop when we get two consecutive blank rows above header area
+            if consecutive_blank >= 2:
+                break
+            else:
+                continue
+        else:
+            consecutive_blank = 0
+
+        # if numeric-like row appears in the header area, treat it as table start and stop
         if numeric_count >= 3:
-            # numeric table begins here — stop collecting header
             break
 
+        # prepend because we\'re iterating upwards; we\'ll reverse later
         line_text = " ".join(row_vals).strip()
         if line_text:
-            header_lines.append(line_text)
+            header_lines.insert(0, line_text)
             if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
                 detected_dim_line = line_text
 
-    # Dimension extraction
+    # If header_lines still empty, fall back to previous conservative method using grey columns
+    if not header_lines:
+        # Build per-row grey column map
+        grey_cols_by_row = {}
+        for r, c in filled_positions:
+            grey_cols_by_row.setdefault(r, set()).add(c)
+
+        # scan a small range near top of sheet for any textual header
+        for r in range(1, min(20, ws.max_row) + 1):
+            row_vals = []
+            numeric_count = 0
+            cols = sorted(grey_cols_by_row.get(r, list(range(1, min(ws.max_column, 30) + 1))))
+            for c in cols:
+                val = ws.cell(r, c).value
+                if val is None:
+                    continue
+                sval = str(val).strip()
+                if sval == "":
+                    continue
+                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                    numeric_count += 1
+                row_vals.append(sval)
+            if row_vals and numeric_count < 3:
+                header_lines.append(" ".join(row_vals).strip())
+                if not detected_dim_line and re.search(r"dimension|width|cut", header_lines[-1], re.IGNORECASE):
+                    detected_dim_line = header_lines[-1]
+
+    # Ensure header_lines are unique and trimmed
+    header_lines = [ln.strip() for ln in header_lines if ln.strip()]
+
+# Dimension extraction
     if detected_dim_line:
         w_val, c_val = first_pair_from_text(detected_dim_line)
     else:
