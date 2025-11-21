@@ -234,9 +234,10 @@ def extract_kld_data_from_bytes(xl_bytes):
     bytes_io.seek(0)
     df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
     df = df.fillna("").astype(str)
-    df = df[
-        df.apply(lambda r: any(str(x).strip() for x in r), axis=1)
-    ].reset_index(drop=True)
+    df = df_orig.fillna("").astype(str)
+    df = df[df.apply(lambda r: any(x.strip() for x in r), axis=1)]
+    # DO NOT reset index → preserve real Excel row numbers
+
 
     # --- Determine numeric-table start row (same logic) ---
     start_row = 0
@@ -249,7 +250,9 @@ def extract_kld_data_from_bytes(xl_bytes):
             start_row = i
             break
 
-    df_num = df.iloc[start_row:].reset_index(drop=True)
+    df_num = df.iloc[start_row:]
+# again DO NOT reset index
+
 
        # ===========================================
     # TOP SEQUENCE (Original logic preserved)
