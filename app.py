@@ -14,6 +14,27 @@ st.caption("Detects grey header region, extracts header until numeric table, app
 # ===========================================
 
 def clean_numeric_list(seq):
+
+# Gap-limit trimming
+def trim_with_gap_limit(values, target_sum, max_gap=1):
+    cleaned = []
+    gap = 0
+    running_sum = 0
+    for v in values:
+        try: fv=float(v)
+        except: fv=None
+        if fv is None or fv==0:
+            gap += 1
+            if gap > max_gap:
+                break
+            continue
+        cleaned.append(fv)
+        running_sum += fv
+        gap = 0
+        if target_sum>0 and running_sum>=target_sum:
+            break
+    return cleaned
+
     out = []
     for v in seq:
         s = str(v).strip().replace(",", "")
@@ -36,35 +57,10 @@ def first_pair_from_text(text):
     return 0, 0
 
 
-def trim_with_gap_limit(values, target_sum, max_gap=1):
-    """
-    - values: list of numeric measurement values
-    - target_sum: expected total length (cut_length_mm or width_mm)
-    - max_gap: max allowed number of consecutive zeros / empty-slots between numeric values
-    """
-
-    cleaned = []
-    gap = 0
-    running_sum = 0
-
-    for v in values:
-        if v is None or v == "" or float(v) == 0:
-            gap += 1
-            if gap > max_gap:
-                break   # stop sequence
-            continue
-
-        # A real value reset the gap count
-        cleaned.append(float(v))
-        running_sum += float(v)
-        gap = 0
-
-        # Optional stop if we reached target
-        if target_sum > 0 and running_sum >= target_sum:
-            break
-
-    return cleaned
-
+    vals = values.copy()
+    while len(vals) > 1 and target > 0 and sum(vals) > target + tol:
+        vals.pop()
+    return vals
 
 
 # ===========================================
