@@ -335,7 +335,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     # Build list of numeric blocks (merged + unmerged)
     for idx, v in enumerate(df_num[side_col_index].tolist()):
-        sheet_row = start_row + idx      # actual Excel row
+        sheet_row = df.index[start_row + idx]      # actual Excel row
         sval = str(v).strip()
 
         block = find_block(sheet_row, excel_col)
