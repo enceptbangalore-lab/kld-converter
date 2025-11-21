@@ -12,6 +12,7 @@ st.caption("Detects grey header region, extracts header until numeric table, app
 # ===========================================
 # Helpers
 # ===========================================
+
 def clean_numeric_list(seq):
     out = []
     for v in seq:
@@ -29,9 +30,9 @@ def clean_numeric_list(seq):
 
 def first_pair_from_text(text):
     text = str(text)
-    m = re.search(r"(\d+(?:\.\d+)?)\s*[*xX]\s*(\d+(?:\.\d+)?)", text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*[\*xX]\s*(\d+(?:\.\d+)?)", text)
     if m:
-        return int(float(m.group(1))), int(float(m.group(2)))
+        return float(m.group(1)), float(m.group(2))
     return 0, 0
 
 
@@ -43,26 +44,42 @@ def auto_trim_to_target(values, target, tol=1.0):
 
 
 # ===========================================
-# Grey detection
+# Grey detection — Option 1 (any non-white color counts)
 # ===========================================
+
 def cell_is_filled(cell):
-    """Any non-white fill considered as part of grey region."""
+    """Return True if a cell has a visible non-white fill.
+
+    Rules (Option 1):
+    - patternType must not be None or 'none'
+    - if fgColor.rgb exists, treat non-white rgb as filled
+    - if rgb missing but indexed/theme present, treat as filled (conservative)
+    """
     try:
         fl = getattr(cell, "fill", None)
         if not fl:
             return False
 
         patt = getattr(fl, "patternType", None)
-        if patt and str(patt).lower() != "none":
-            return True
+        if patt is None or str(patt).lower() == "none":
+            return False
 
         fg = getattr(fl, "fgColor", None)
-        if fg:
-            rgb = getattr(fg, "rgb", None)
-            if rgb:
-                rgb = str(rgb).upper()
-                if rgb not in ("FFFFFFFF", "00FFFFFF", "00000000", "FFFFFF"):
-                    return True
+        if not fg:
+            return False
+
+        rgb = getattr(fg, "rgb", None)
+        if rgb:
+            rgb = str(rgb).upper()
+            # Exclude pure white variants
+            if rgb in ("FFFFFFFF", "FFFFFF", "00FFFFFF"):
+                return False
+            return True
+
+        # If rgb not set, but there's indexed/theme/tint info, assume colored
+        if getattr(fg, "indexed", None) is not None or getattr(fg, "theme", None) is not None:
+            return True
+
         return False
 
     except Exception:
@@ -72,6 +89,7 @@ def cell_is_filled(cell):
 # ===========================================
 # Extraction
 # ===========================================
+
 def extract_kld_data_from_bytes(xl_bytes):
 
     bytes_io = io.BytesIO(xl_bytes)
@@ -83,40 +101,68 @@ def extract_kld_data_from_bytes(xl_bytes):
     filled_positions = []
     for r in range(1, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
-            if cell_is_filled(ws.cell(r, c)):
-                filled_positions.append((r, c))
+            try:
+                if cell_is_filled(ws.cell(r, c)):
+                    filled_positions.append((r, c))
+            except Exception:
+                # ignore odd cells
+                continue
 
+    # If no filled positions found, fallback to reasonable defaults
     if filled_positions:
         rows = [r for r, _ in filled_positions]
         cols = [c for _, c in filled_positions]
         r_min, r_max = min(rows), max(rows)
         c_min, c_max = min(cols), max(cols)
     else:
+        # fallback default region (keeps previous behavior)
         r_min, r_max, c_min, c_max = 2, 68, 2, 28
         r_max = min(r_max, ws.max_row)
         c_max = min(c_max, ws.max_column)
 
-    # Collect header lines until numeric table begins
+    # Build per-row grey column map (strict row-wise extraction)
+    grey_cols_by_row = {}
+    for r, c in filled_positions:
+        grey_cols_by_row.setdefault(r, set()).add(c)
+
+    # Collect header lines until numeric table begins — only using grey columns per row
     header_lines = []
     detected_dim_line = ""
 
-    for r in range(r_min, r_max + 1):
+    if grey_cols_by_row:
+        rows_to_scan = sorted(r for r in grey_cols_by_row.keys() if r_min <= r <= r_max)
+    else:
+        # if nothing marked, fall back to scanning the default row range
+        rows_to_scan = list(range(r_min, r_max + 1))
+
+    for r in rows_to_scan:
         row_vals = []
         numeric_count = 0
-        for c in range(c_min, c_max + 1):
-            val = ws.cell(r, c).value
+
+        # If we have explicit grey cols for this row, use them; otherwise scan within c_min..c_max
+        if r in grey_cols_by_row:
+            cols = sorted(grey_cols_by_row[r])
+        else:
+            cols = list(range(c_min, c_max + 1))
+
+        for c in cols:
+            try:
+                val = ws.cell(r, c).value
+            except Exception:
+                val = None
             if val is None:
                 continue
             sval = str(val).strip()
             if sval == "":
                 continue
 
-            if re.match(r"^-?\d+(\.\d+)?$", sval):
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
                 numeric_count += 1
 
             row_vals.append(sval)
 
         if numeric_count >= 3:
+            # numeric table begins here — stop collecting header
             break
 
         line_text = " ".join(row_vals).strip()
@@ -143,7 +189,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
 
-    # Load into pandas to extract numeric table
+    # Load into pandas to extract numeric table (we need full sheet for numeric scanning)
     bytes_io.seek(0)
     df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
     df = df.fillna("").astype(str)
@@ -151,7 +197,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     start_row = 0
     for i in range(min(120, len(df))):
-        numeric_count = sum(1 for c in df.iloc[i].tolist() if re.match(r"^\d+(\.\d+)?$", c.strip()))
+        numeric_count = sum(1 for c in df.iloc[i].tolist() if re.match(r"^\d+(?:\.\d+)?$", c.strip()))
         if numeric_count >= 3:
             start_row = i
             break
@@ -169,26 +215,28 @@ def extract_kld_data_from_bytes(xl_bytes):
                 best_diff = diff
                 top_seq_nums = nums
 
-    # Side sequence
-    side_seq_nums = []
-    best_diff = float("inf")
+    # Side sequence: detect column with longest vertical numeric run
+    col_counts={}
     for c in df_num.columns:
-        nums = clean_numeric_list(df_num[c].tolist())
-        for i in range(len(nums)):
-            s = 0
-            for j in range(i, len(nums)):
-                s += nums[j]
-                if j - i + 1 >= 3:
-                    diff = abs(s - width_mm)
-                    if diff < best_diff:
-                        best_diff = diff
-                        side_seq_nums = nums[i:j+1]
-
+        nums=clean_numeric_list(df_num[c].tolist())
+        col_counts[c]=len([x for x in nums if isinstance(x,(int,float))])
+    side_col=max(col_counts,key=col_counts.get)
+    side_seq_nums=clean_numeric_list(df_num[side_col].tolist())
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
-    top_seq_str = ",".join(str(int(v)) for v in top_seq_trimmed)
-    side_seq_str = ",".join(str(int(v)) for v in side_seq_trimmed)
+    # keep decimals, but remove trailing .0 where possible
+    def _fmt_list(vals):
+        out = []
+        for v in vals:
+            s = str(v)
+            if "." in s:
+                s = s.rstrip('0').rstrip('.')
+            out.append(s)
+        return out
+
+    top_seq_str = ",".join(_fmt_list(top_seq_trimmed))
+    side_seq_str = ",".join(_fmt_list(side_seq_trimmed))
 
     return {
         "job_name": job_name,
@@ -197,29 +245,30 @@ def extract_kld_data_from_bytes(xl_bytes):
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
         "top_seq": top_seq_str,
-        "side_seq": side_seq_str
+        "side_seq": side_seq_str,
     }
 
 
 # ===========================================
 # SVG generator
 # ===========================================
+
 def make_svg(data, line_spacing_mm=5.0):
 
     def parse_seq(src):
         if not src:
             return []
         parts = re.split(r"[,;|]", str(src))
-        return [float(p.strip()) for p in parts if re.match(r"^\d+(\.\d+)?$", p.strip())]
+        return [float(p.strip()) for p in parts if re.match(r"^-?\d+(?:\.\d+)?$", p.strip())]
 
-    W = float(data["cut_length_mm"])
-    H = float(data["width_mm"])
+    W = float(data["cut_length_mm"]) if data.get("cut_length_mm") else 0.0
+    H = float(data["width_mm"]) if data.get("width_mm") else 0.0
     top_seq = parse_seq(data["top_seq"])
     side_seq = parse_seq(data["side_seq"])
 
-    header_lines = data["header_lines"]
+    header_lines = data.get("header_lines") or []
     if not header_lines:
-        header_lines = [data["job_name"], data["dimension_text"]]
+        header_lines = [data.get("job_name", "KLD Layout"), data.get("dimension_text", "")]
 
     # Artboard expansion
     extra = 60
@@ -229,7 +278,7 @@ def make_svg(data, line_spacing_mm=5.0):
 
     dieline = "#92278f"
     stroke_pt = 0.356
-    font_mm = 1.5
+    font_mm = 0.8
     tick_short = 5
     top_shift_up = 5
     left_shift_left = 5
@@ -264,7 +313,7 @@ def make_svg(data, line_spacing_mm=5.0):
         x += v
         out.append(f'<line x1="{margin+x}" y1="{margin-top_shift_up}" x2="{margin+x}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
         mid = x - v / 2
-        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" text-anchor="middle" class="text">{round(v, 2)}</text>')
 
     y = 0
     out.append(f'<line x1="{margin-left_shift_left}" y1="{margin}" x2="{margin-left_shift_left-tick_short}" y2="{margin}" class="dieline"/>')
@@ -273,7 +322,7 @@ def make_svg(data, line_spacing_mm=5.0):
         out.append(f'<line x1="{margin-left_shift_left}" y1="{margin+y}" x2="{margin-left_shift_left-tick_short}" y2="{margin+y}" class="dieline"/>')
         midY = y - v / 2
         lx = margin - left_shift_left - tick_short - 2 + left_text_shift_right
-        out.append(f'<text x="{lx}" y="{margin+midY}" transform="rotate(-90 {lx} {margin+midY})" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(f'<text x="{lx}" y="{margin+midY}" transform="rotate(-90 {lx} {margin+midY})" text-anchor="middle" class="text">{round(v, 2)}</text>')
     out.append('</g>')
 
     # Crop marks
@@ -294,20 +343,20 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append('</g>')
 
     # Width marker
-    total_width = sum(side_seq)
+    total_width = sum(side_seq) if side_seq else 0
     wx = pc_x + photocell_w + 4
     midY = margin + total_width / 2
     out.append('<g id="WidthMarker">')
     out.append(f'<line x1="{wx}" y1="{margin}" x2="{wx}" y2="{margin+total_width}" class="dieline"/>')
-    out.append(f'<text x="{wx+6}" y="{midY}" transform="rotate(-90 {wx+6} {midY})" class="text" text-anchor="middle">width = {int(total_width)} mm</text>')
+    out.append(f'<text x="{wx+6}" y="{midY}" transform="rotate(-90 {wx+6} {midY})" class="text" text-anchor="middle">width = {round(total_width,2)} mm</text>')
     out.append('</g>')
 
     # Height marker
-    total_height = sum(top_seq)
+    total_height = sum(top_seq) if top_seq else 0
     hy = margin + total_width + 5
     out.append('<g id="HeightMarker">')
     out.append(f'<line x1="{margin}" y1="{hy}" x2="{margin+total_height}" y2="{hy}" class="dieline"/>')
-    out.append(f'<text x="{margin+total_height/2}" y="{hy+6}" text-anchor="middle" class="text">height = {int(total_height)} mm</text>')
+    out.append(f'<text x="{margin+total_height/2}" y="{hy+6}" text-anchor="middle" class="text">height = {round(total_height,2)} mm</text>')
     out.append('</g>')
 
     # Dynamic boxes
@@ -327,10 +376,10 @@ def make_svg(data, line_spacing_mm=5.0):
     # Seals
     out.append('<g id="Seals">')
 
-    total_side = sum(side_seq)
+    total_side = sum(side_seq) if side_seq else 0
     mid_side = margin + total_side / 2
-    first_top = top_seq[0]
-    last_top = top_seq[-1]
+    first_top = top_seq[0] if top_seq else 0
+    last_top = top_seq[-1] if top_seq else 0
 
     # Left END SEAL
     left_end_x = margin + first_top / 2
@@ -341,11 +390,11 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append(f'<text x="{right_end_x}" y="{mid_side}" transform="rotate(90 {right_end_x} {mid_side})" text-anchor="middle" class="text">END SEAL</text>')
 
     # Center Seals
-    total_top = sum(top_seq)
+    total_top = sum(top_seq) if top_seq else 0
     mid_top_x = margin + total_top / 2
 
-    first_side = side_seq[0]
-    last_side = side_seq[-1]
+    first_side = side_seq[0] if side_seq else 0
+    last_side = side_seq[-1] if side_seq else 0
 
     top_center_y = margin + first_side / 2
     bottom_center_y = margin + total_side - last_side / 2
@@ -372,7 +421,7 @@ if uploaded_file:
         # Parse sequences for validation
         def parse_seq_list(src):
             parts = re.split(r"[,;|]", str(src))
-            return [float(p.strip()) for p in parts if re.match(r"^\d+(\.\d+)?$", p.strip())]
+            return [float(p.strip()) for p in parts if re.match(r"^-?\d+(?:\.\d+)?$", p.strip())]
 
         top_seq = parse_seq_list(data["top_seq"])
         side_seq = parse_seq_list(data["side_seq"])
@@ -386,12 +435,12 @@ if uploaded_file:
         # Strict validation
         errors = []
 
-        if cut_length_mm and sum_top and sum_top != float(cut_length_mm):
+        if cut_length_mm and sum_top and abs(sum_top - float(cut_length_mm)) > 0.001:
             errors.append(
                 f"Sum of top_seq = {sum_top} mm does NOT match cut_length_mm = {cut_length_mm} mm."
             )
 
-        if width_mm and sum_side and sum_side != float(width_mm):
+        if width_mm and sum_side and abs(sum_side - float(width_mm)) > 0.001:
             errors.append(
                 f"Sum of side_seq = {sum_side} mm does NOT match width_mm = {width_mm} mm."
             )
