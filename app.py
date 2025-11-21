@@ -232,10 +232,14 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     # --- Load into pandas for numeric-table extraction ---
     bytes_io.seek(0)
-    df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
-    df = df.fillna("").astype(str)
-    df = df_orig.fillna("").astype(str)
-    df = df[df.apply(lambda r: any(x.strip() for x in r), axis=1)]
+    # Load into pandas but PRESERVE original Excel row indices
+    bytes_io.seek(0)
+    df_orig = pd.read_excel(bytes_io, header=None, engine="openpyxl")
+    df_orig = df_orig.fillna("").astype(str)
+
+    # Remove fully blank rows WITHOUT resetting index
+    df = df_orig[df_orig.apply(lambda r: any(str(x).strip() for x in r), axis=1)]
+
     # DO NOT reset index → preserve real Excel row numbers
 
 
