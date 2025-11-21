@@ -14,9 +14,7 @@ st.caption("Detects grey header region, extracts header until numeric table, app
 # ===========================================
 
 def clean_numeric_list(seq):
-
 # Gap-limit trimming
-
 def trim_with_gap_limit(values, target_sum, max_gap=1):
     cleaned = []
     gap = 0
