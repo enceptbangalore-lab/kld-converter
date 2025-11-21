@@ -274,35 +274,102 @@ def extract_kld_data_from_bytes(xl_bytes):
     )
 
     # ===========================================
-    # SIDE SEQUENCE (Longest column + row-gap cutoff)
+    # SIDE SEQUENCE (Merged-cell–aware extraction)
     # ===========================================
 
-    col_data = {}   # column → list of (rowIndex, value)
+    # Step 1: Build merged-range map from openpyxl
+    merged_blocks = []  # (min_row, max_row, min_col, max_col)
 
-    # Scan every column in df_num
-    for c in df_num.columns:
-        vals = []
-        for idx, v in enumerate(df_num[c].tolist()):
-            sval = str(v).strip()
-            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                vals.append((idx, float(sval)))
-        col_data[c] = vals
+    for rng in ws.merged_cells.ranges:
+        merged_blocks.append((
+            rng.min_row,
+            rng.max_row,
+            rng.min_col,
+            rng.max_col
+        ))
 
-    # Column having the longest numeric vertical run
-    side_col = max(col_data, key=lambda c: len(col_data[c]))
-    vertical_vals = col_data[side_col]
+    # Helper: find merged block for a given (row, col)
+    def find_merged_block(r, c):
+        for (r1, r2, c1, c2) in merged_blocks:
+            if r1 <= r <= r2 and c1 <= c <= c2:
+                return (r1, r2, c1, c2)
+        return None
 
-    # Apply row-gap cutoff: STOP when >2 missing rows between consecutive numbers
+    # Helper: extract numeric value from merged block
+    def get_merged_block_value(r1, r2, c1, c2):
+        values = []
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                val = ws.cell(rr, cc).value
+                if val is None:
+                    continue
+                sval = str(val).strip()
+                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                    values.append(float(sval))
+
+        if not values:
+            return None  # merged block has no numeric
+
+        uniq = set(values)
+        if len(uniq) > 1:
+            # Multiple different numeric values inside merged block → INVALID KLD
+            raise ValueError(
+                f"Merged block at rows {r1}-{r2} has conflicting values {sorted(uniq)}"
+            )
+
+        return values[0]
+
+    # Step 2: Scan df_num columns to find longest vertical numeric continuity
+    col_numeric_blocks = {}  # col → list of (block_row, value)
+
+    for col in df_num.columns:
+        blocks = []
+        visited = set()
+
+        for idx, raw_value in enumerate(df_num[col].tolist()):
+            r_absolute = start_row + idx  # actual row in sheet
+            sval = str(raw_value).strip()
+
+            # Determine merged block
+            block = find_merged_block(r_absolute, col + 1)
+
+            if block:
+                (r1, r2, c1, c2) = block
+                if block in visited:
+                    continue  # already processed
+                visited.add(block)
+
+                block_value = get_merged_block_value(r1, r2, c1, c2)
+
+                # Only count if numeric
+                if block_value is not None:
+                    blocks.append((r1, block_value))  # use top row as block index
+
+            else:
+                # Non-merged cell
+                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                    blocks.append((r_absolute, float(sval)))
+
+        # Sort by row position
+        blocks.sort(key=lambda x: x[0])
+        col_numeric_blocks[col] = blocks
+
+    # Step 3: Pick column with the maximum number of numeric blocks
+    side_col = max(col_numeric_blocks, key=lambda c: len(col_numeric_blocks[c]))
+    blocks = col_numeric_blocks[side_col]
+
+    # Step 4: Apply row-gap cutoff between adjacent merged blocks
     side_seq_nums = []
-    last_idx = None
+    last_block_row = None
 
-    for idx, val in vertical_vals:
-        if last_idx is not None and (idx - last_idx) > 2:
-            break
+    for (block_row, val) in blocks:
+        if last_block_row is not None:
+            if (block_row - last_block_row) > 2:
+                break  # GAP LIMIT EXCEEDED
+
         side_seq_nums.append(val)
-        last_idx = idx
+        last_block_row = block_row
 
-    # No trimming needed after row-gap cutoff
     side_seq_trimmed = side_seq_nums
 
     # ===========================================
@@ -334,6 +401,7 @@ def extract_kld_data_from_bytes(xl_bytes):
         "top_seq": top_seq_str,
         "side_seq": side_seq_str,
     }
+
 
 # ===========================================
 # SVG generator (kept EXACTLY as your original)
