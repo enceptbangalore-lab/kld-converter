@@ -36,11 +36,35 @@ def first_pair_from_text(text):
     return 0, 0
 
 
-def auto_trim_to_target(values, target, tol=1.0):
-    vals = values.copy()
-    while len(vals) > 1 and target > 0 and sum(vals) > target + tol:
-        vals.pop()
-    return vals
+def trim_with_gap_limit(values, target_sum, max_gap=1):
+    """
+    - values: list of numeric measurement values
+    - target_sum: expected total length (cut_length_mm or width_mm)
+    - max_gap: max allowed number of consecutive zeros / empty-slots between numeric values
+    """
+
+    cleaned = []
+    gap = 0
+    running_sum = 0
+
+    for v in values:
+        if v is None or v == "" or float(v) == 0:
+            gap += 1
+            if gap > max_gap:
+                break   # stop sequence
+            continue
+
+        # A real value reset the gap count
+        cleaned.append(float(v))
+        running_sum += float(v)
+        gap = 0
+
+        # Optional stop if we reached target
+        if target_sum > 0 and running_sum >= target_sum:
+            break
+
+    return cleaned
+
 
 
 # ===========================================
@@ -222,8 +246,8 @@ def extract_kld_data_from_bytes(xl_bytes):
         col_counts[c]=len([x for x in nums if isinstance(x,(int,float))])
     side_col=max(col_counts,key=col_counts.get)
     side_seq_nums=clean_numeric_list(df_num[side_col].tolist())
-    top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
-    side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
+    top_seq_trimmed = trim_with_gap_limit(top_seq_nums, cut_length_mm, max_gap=1)
+    side_seq_trimmed = trim_with_gap_limit(side_seq_nums, width_mm, max_gap=1)
 
     # keep decimals, but remove trailing .0 where possible
     def _fmt_list(vals):
