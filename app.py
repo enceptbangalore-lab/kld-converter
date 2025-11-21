@@ -14,41 +14,19 @@ st.caption("Detects grey header region, extracts header until numeric table, app
 # ===========================================
 
 def clean_numeric_list(seq):
-
-# Gap-limit trimming
-def trim_with_gap_limit(values, target_sum, max_gap=1):
-    cleaned = []
-    gap = 0
-    running_sum = 0
-    for v in values:
-        try: fv=float(v)
-        except: fv=None
-        if fv is None or fv==0:
-            gap += 1
-            if gap > max_gap:
-                break
-            continue
-        cleaned.append(fv)
-        running_sum += fv
-        gap = 0
-        if target_sum>0 and running_sum>=target_sum:
-            break
-    return cleaned
-
     out = []
     for v in seq:
-        s = str(v).strip().replace(",", "")
-        if not s or s.lower() in ("nan", "none"):
+        s = str(v).strip().replace(',', '')
+        if not s or s.lower() in ('nan', 'none'):
             continue
         try:
             out.append(float(s))
         except:
-            m = re.search(r"(-?\d+(?:\.\d+)?)", s)
+            import re
+            m = re.search(r'(-?\d+(?:\.\d+)?)', s)
             if m:
                 out.append(float(m.group(1)))
     return out
-
-
 
 def trim_with_gap_limit(values, target_sum, max_gap=1):
     cleaned = []
@@ -67,7 +45,7 @@ def trim_with_gap_limit(values, target_sum, max_gap=1):
         cleaned.append(fv)
         running_sum += fv
         gap = 0
-        if target_sum>0 and running_sum>=target_sum:
+        if target_sum > 0 and running_sum >= target_sum:
             break
     return cleaned
 
