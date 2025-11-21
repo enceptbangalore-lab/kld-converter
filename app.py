@@ -251,8 +251,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     df_num = df.iloc[start_row:].reset_index(drop=True)
 
-    # Part 3 continues from here…
-    # ===========================================
+        # ===========================================
     # TOP SEQUENCE (Original logic preserved)
     # ===========================================
 
@@ -278,7 +277,6 @@ def extract_kld_data_from_bytes(xl_bytes):
     # SIDE SEQUENCE (Longest column + row-gap cutoff)
     # ===========================================
 
-    import re
     col_data = {}   # column → list of (rowIndex, value)
 
     # Scan every column in df_num
@@ -336,6 +334,7 @@ def extract_kld_data_from_bytes(xl_bytes):
         "top_seq": top_seq_str,
         "side_seq": side_seq_str,
     }
+
 # ===========================================
 # SVG generator (kept EXACTLY as your original)
 # ===========================================
