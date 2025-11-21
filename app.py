@@ -14,30 +14,16 @@ st.caption("Detects grey header region, extracts header until numeric table, app
 # ===========================================
 
 def clean_numeric_list(seq):
-    out = []
-    for v in seq:
-        s = str(v).strip().replace(',', '')
-        if not s or s.lower() in ('nan', 'none'):
-            continue
-        try:
-            out.append(float(s))
-        except:
-            import re
-            m = re.search(r'(-?\d+(?:\.\d+)?)', s)
-            if m:
-                out.append(float(m.group(1)))
-    return out
 
+# Gap-limit trimming
 def trim_with_gap_limit(values, target_sum, max_gap=1):
     cleaned = []
     gap = 0
     running_sum = 0
     for v in values:
-        try:
-            fv = float(v)
-        except:
-            fv = None
-        if fv is None or fv == 0:
+        try: fv=float(v)
+        except: fv=None
+        if fv is None or fv==0:
             gap += 1
             if gap > max_gap:
                 break
@@ -45,9 +31,23 @@ def trim_with_gap_limit(values, target_sum, max_gap=1):
         cleaned.append(fv)
         running_sum += fv
         gap = 0
-        if target_sum > 0 and running_sum >= target_sum:
+        if target_sum>0 and running_sum>=target_sum:
             break
     return cleaned
+
+    out = []
+    for v in seq:
+        s = str(v).strip().replace(",", "")
+        if not s or s.lower() in ("nan", "none"):
+            continue
+        try:
+            out.append(float(s))
+        except:
+            m = re.search(r"(-?\d+(?:\.\d+)?)", s)
+            if m:
+                out.append(float(m.group(1)))
+    return out
+
 
 def first_pair_from_text(text):
     text = str(text)
@@ -235,15 +235,30 @@ def extract_kld_data_from_bytes(xl_bytes):
                 best_diff = diff
                 top_seq_nums = nums
 
-    # Side sequence: detect column with longest vertical numeric run
-    col_counts={}
+    # Side sequence with row-gap based trimming
+    # detect column with longest vertical numeric run
+    col_data={}  # c: list of (r,val)
+    import re
     for c in df_num.columns:
-        nums=clean_numeric_list(df_num[c].tolist())
-        col_counts[c]=len([x for x in nums if isinstance(x,(int,float))])
-    side_col=max(col_counts,key=col_counts.get)
-    side_seq_nums=clean_numeric_list(df_num[side_col].tolist())
+        vals=[]
+        for idx,v in enumerate(df_num[c].tolist()):
+            sval=str(v).strip()
+            if re.match(r'^-?\d+(?:\.\d+)?$', sval):
+                vals.append((idx, float(sval)))
+        col_data[c]=vals
+    side_col=max(col_data, key=lambda c: len(col_data[c]))
+
+    # apply row-gap trimming
+    side_seq_nums=[]
+    last_idx=None
+    for idx,val in col_data[side_col]:
+        if last_idx is not None and idx-last_idx>2:
+            break
+        side_seq_nums.append(val)
+        last_idx=idx
+    # top sequence trimming with column-gap based (assuming contiguous list)
     top_seq_trimmed = trim_with_gap_limit(top_seq_nums, cut_length_mm, max_gap=1)
-    side_seq_trimmed = trim_with_gap_limit(side_seq_nums, width_mm, max_gap=1)
+    side_seq_trimmed = side_seq_nums  # already trimmed by row-gap logic
 
     # keep decimals, but remove trailing .0 where possible
     def _fmt_list(vals):
@@ -255,8 +270,9 @@ def extract_kld_data_from_bytes(xl_bytes):
             out.append(s)
         return out
 
-    top_seq_str = ",".join(_fmt_list(top_seq_trimmed))
-    side_seq_str = ",".join(_fmt_list(side_seq_trimmed))
+    # top sequence trimming with column-gap based (assuming contiguous list)
+    top_seq_trimmed = trim_with_gap_limit(top_seq_nums, cut_length_mm, max_gap=1)
+    side_seq_trimmed = side_seq_nums  # already trimmed by row-gap logic
 
     return {
         "job_name": job_name,
