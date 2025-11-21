@@ -161,7 +161,7 @@ def extract_kld_data_from_bytes(xl_bytes):
 
             row_vals.append(sval)
 
-        if numeric_count >= 3:
+        if numeric_count >= 2:
             # numeric table begins here — stop collecting header
             break
 
