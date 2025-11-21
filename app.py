@@ -1,4 +1,7 @@
-# app.py
+# ===========================================
+# app.py — Clean Rebuild (Part 1 of 5)
+# ===========================================
+
 import streamlit as st
 import pandas as pd
 import re
@@ -37,6 +40,38 @@ def clean_numeric_list(seq):
     return out
 
 
+def trim_with_gap_limit(values, target_sum, max_gap=1):
+    """
+    Allows only up to `max_gap` consecutive empty/zero values.
+    Stops reading when gap limit exceeded or when target reached.
+    Used for top_seq (column-gap trimming).
+    """
+    cleaned = []
+    gap = 0
+    running_sum = 0
+
+    for v in values:
+        try:
+            fv = float(v)
+        except:
+            fv = None
+
+        if fv is None or fv == 0:
+            gap += 1
+            if gap > max_gap:
+                break
+            continue
+
+        cleaned.append(fv)
+        running_sum += fv
+        gap = 0
+
+        if target_sum > 0 and running_sum >= target_sum:
+            break
+
+    return cleaned
+
+
 def first_pair_from_text(text):
     """
     Extracts dimension pairs like '416 * 386' or '416x386'.
@@ -47,11 +82,10 @@ def first_pair_from_text(text):
     if m:
         return float(m.group(1)), float(m.group(2))
     return 0, 0
-
-
 # ===========================================
 # Grey detection (kept exactly as your logic)
 # ===========================================
+
 def cell_is_filled(cell):
     """
     Returns True if the cell has a visible non-white fill.
@@ -88,9 +122,12 @@ def cell_is_filled(cell):
 
 
 # ===========================================
-# Extraction (full implementation)
+# Extraction (beginning)
+# Top logic will be added in Part 3
 # ===========================================
+
 def extract_kld_data_from_bytes(xl_bytes):
+
     bytes_io = io.BytesIO(xl_bytes)
 
     # --- Load workbook for grey detection ---
@@ -195,261 +232,154 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     # --- Load into pandas for numeric-table extraction ---
     bytes_io.seek(0)
-    # preserve original indices so that we can map back to real Excel rows
-    df_orig = pd.read_excel(bytes_io, header=None, engine="openpyxl")
-    df_orig = df_orig.fillna("").astype(str)
+    df = pd.read_excel(bytes_io, header=None, engine="openpyxl")
+    df = df.fillna("").astype(str)
+    df = df[
+        df.apply(lambda r: any(str(x).strip() for x in r), axis=1)
+    ].reset_index(drop=True)
 
-    # Remove fully blank rows but KEEP original Excel row indices
-    mask = df_orig.apply(lambda r: any(str(x).strip() for x in r), axis=1)
-    df = df_orig[mask]
-
-    # --- Determine numeric-table start row using df (which keeps original indices) ---
-    start_row_index = None
-    # iterate over df rows in original index order
-    for idx in df.index[:min(120, len(df))]:
+    # --- Determine numeric-table start row (same logic) ---
+    start_row = 0
+    for i in range(min(120, len(df))):
         numeric_count = sum(
-            1 for c in df.loc[idx].tolist() if re.match(r"^\d+(\.\d+)?$", str(c).strip())
+            1 for c in df.iloc[i].tolist()
+            if re.match(r"^\d+(\.\d+)?$", c.strip())
         )
         if numeric_count >= 3:
-            start_row_index = idx
+            start_row = i
             break
 
-    if start_row_index is None:
-        # fallback: use first non-empty row of df
-        if len(df.index) > 0:
-            start_row_index = df.index[0]
-        else:
-            start_row_index = 0
+    df_num = df.iloc[start_row:].reset_index(drop=True)
 
-    # df_num is the slice from start_row_index onward (preserve index)
-    df_num = df.loc[start_row_index:].copy()
+       # ===========================================
+    # TOP SEQUENCE (Original logic preserved)
+    # ===========================================
 
-    # -------------------------
-    # TOP SEQUENCE (horizontal)
-    # -------------------------
-    # Identify rows inside the grey box (use df_num index list intersecting r_min..r_max)
-    candidate_rows = [r for r in df_num.index if r_min <= r <= r_max]
+    top_seq_nums = []
+    best_diff = float("inf")
 
-    # Choose first qualifying row (row that has more than 2 numeric values across grey columns)
-    top_row_choice = None
-    for r in candidate_rows:
-        numeric_count = 0
-        for c in range(c_min, c_max + 1):
-            sval = str(df_num.at[r, c]) if c in df_num.columns else ""
-            if re.match(r"^-?\d+(?:\.\d+)?$", str(sval).strip()):
-                numeric_count += 1
-        if numeric_count > 2:
-            top_row_choice = r
-            break
+    for i in range(len(df_num)):
+        nums = clean_numeric_list(df_num.iloc[i].tolist())
+        if len(nums) >= 4:
+            diff = abs(sum(nums) - cut_length_mm)
+            if diff < best_diff:
+                best_diff = diff
+                top_seq_nums = nums
 
-    top_seq_list = []
+    top_seq_trimmed = trim_with_gap_limit(
+        top_seq_nums,
+        target_sum=cut_length_mm,
+        max_gap=1
+    )
 
-    if top_row_choice is not None:
-        # Build merged ranges lookup
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
+    # ===========================================
+    # SIDE SEQUENCE (Merged-cell + unmerged numeric + row-gap cutoff)
+    # ===========================================
 
-        def find_merged_block_for_cell(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
-            return None
+    merged_ranges = []
+    for rng in ws.merged_cells.ranges:
+        merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
 
-        def get_block_value(r1, r2, c1, c2):
-            vals = []
-            for rr in range(r1, r2 + 1):
-                for cc in range(c1, c2 + 1):
-                    v = ws.cell(rr, cc).value
-                    if v is None:
-                        continue
-                    sval = str(v).strip()
-                    if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                        vals.append(float(sval))
-            if not vals:
-                return None, False
-            uniq = set(vals)
-            if len(uniq) > 1:
-                raise ValueError(f"Merged block {r1}-{r2},{c1}-{c2} has conflicting values {sorted(uniq)}")
-            return vals[0], True  # True indicates merged-block value
+    # Helper: check if (r,c) is inside a merged block
+    def find_block(r, c):
+        for (r1, r2, c1, c2) in merged_ranges:
+            if r1 <= r <= r2 and c1 <= c <= c2:
+                return (r1, r2, c1, c2)
+        return None
 
-        # Scan left-to-right across grey columns (c_min..c_max), collecting blocks
-        collected = []
-        seen_blocks = set()
-        for c in range(c_min, c_max + 1):
-            sheet_r = top_row_choice
-            block = find_merged_block_for_cell(sheet_r, c)
-            if block:
-                (r1, r2, c1, c2) = block
-                block_id = (r1, r2, c1, c2)
-                if block_id in seen_blocks:
+    # Helper: extract numeric value from merged block
+    def extract_block_value(r1, r2, c1, c2):
+        nums = []
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                v = ws.cell(rr, cc).value
+                if v is None:
                     continue
-                seen_blocks.add(block_id)
-                val, is_merged = get_block_value(r1, r2, c1, c2)
-                if val is not None:
-                    # use the left-most column of the block as block position
-                    block_col_position = c1
-                    collected.append((block_col_position, val, True))
-            else:
-                # unmerged cell at (top_row_choice, c)
-                sval = ws.cell(top_row_choice, c).value
-                if sval is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(sval).strip()):
-                    collected.append((c, float(str(sval).strip()), False))
+                sval = str(v).strip()
+                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                    nums.append(float(sval))
 
-        # sort collected by column position
-        collected.sort(key=lambda x: x[0])
-
-        # Apply the gap rule: merged blocks always accepted; unmerged must respect gap <= 1
-        top_seq_list = []
-        last_unmerged_col = None
-        for colpos, val, is_merged in collected:
-            if is_merged:
-                top_seq_list.append(val)
-            else:
-                if last_unmerged_col is None:
-                    top_seq_list.append(val)
-                    last_unmerged_col = colpos
-                else:
-                    if (colpos - last_unmerged_col) <= 2:
-                        top_seq_list.append(val)
-                        last_unmerged_col = colpos
-                    else:
-                        break  # gap limit exceeded for unmerged sequence
-
-    # --------------------------
-    # SIDE SEQUENCE (vertical)
-    # --------------------------
-    # Determine candidate columns inside grey-box
-    candidate_cols = [c for c in range(c_min, c_max + 1) if c in df_num.columns]
-
-    # For each candidate column, compute how many numeric items (counting merged blocks as 1)
-    def count_numeric_items_in_column(excel_col):
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
-
-        def find_block(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
+        if not nums:
             return None
 
-        seen = set()
+        if len(set(nums)) > 1:
+            raise ValueError(
+                f"Merged block {r1}-{r2} contains conflicting numeric values: {nums}"
+            )
+
+        return nums[0]
+
+    # Collect merged-block numeric entries AND unmerged numeric rows
+    merged_numeric = []
+    unmerged_numeric = []
+
+    side_col_index = None
+
+    # Determine df_num → actual sheet col
+    # df_num's columns align directly after start_row offset
+    # Identify the column with most numeric activity (old logic)
+    col_counts = {}
+    for c in df_num.columns:
         count = 0
-        # iterate df_num in original sheet row order
-        for sheet_row in df_num.index:
-            # only consider rows inside grey region vertically
-            if not (r_min <= sheet_row <= r_max):
+        for v in df_num[c].tolist():
+            sval = str(v).strip()
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                count += 1
+        col_counts[c] = count
+
+    # Choose the same "active" column
+    side_col_index = max(col_counts, key=lambda x: col_counts[x])
+
+    # Absolute column index in Excel = df_num column index + 1
+    excel_col = side_col_index + 1
+
+    # Build list of numeric blocks (merged + unmerged)
+    for idx, v in enumerate(df_num[side_col_index].tolist()):
+        sheet_row = start_row + idx      # actual Excel row
+        sval = str(v).strip()
+
+        block = find_block(sheet_row, excel_col)
+
+        if block:
+            (r1, r2, c1, c2) = block
+
+            # Avoid processing same block multiple times
+            if any(b[0] == r1 for b in merged_numeric):
                 continue
-            block = find_block(sheet_row, excel_col)
-            if block:
-                if block in seen:
-                    continue
-                seen.add(block)
-                # check if merged block has numeric value
-                r1, r2, c1, c2 = block
-                found_num = False
-                for rr in range(r1, r2 + 1):
-                    for cc in range(c1, c2 + 1):
-                        v = ws.cell(rr, cc).value
-                        if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                            found_num = True
-                            break
-                    if found_num:
-                        break
-                if found_num:
-                    count += 1
-            else:
-                # unmerged cell
-                v = ws.cell(sheet_row, excel_col).value
-                if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                    count += 1
-        return count
 
-    # select the first (left-most) qualifying column that has >2 numeric items
-    qualifying_cols = []
-    for col in candidate_cols:
-        cnt = count_numeric_items_in_column(col)
-        if cnt > 2:
-            qualifying_cols.append(col)
+            block_value = extract_block_value(r1, r2, c1, c2)
+            if block_value is not None:
+                merged_numeric.append((r1, block_value))
 
-    side_seq_list = []
-    if qualifying_cols:
-        chosen_col = qualifying_cols[0]
+        else:
+            # unmerged numeric cell
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                unmerged_numeric.append((sheet_row, float(sval)))
 
-        # Build merged ranges list for lookups
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
+    # Combine merged + unmerged
+    combined = merged_numeric + unmerged_numeric
 
-        def find_block(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
-            return None
+    # Sort by row
+    combined.sort(key=lambda x: x[0])
 
-        def get_block_value_and_flag(r1, r2, c1, c2):
-            vals = []
-            for rr in range(r1, r2 + 1):
-                for cc in range(c1, c2 + 1):
-                    v = ws.cell(rr, cc).value
-                    if v is None:
-                        continue
-                    sval = str(v).strip()
-                    if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                        vals.append(float(sval))
-            if not vals:
-                return None, True  # merged but no numeric
-            uniq = set(vals)
-            if len(uniq) > 1:
-                raise ValueError(f"Merged block {r1}-{r2},{c1}-{c2} conflicting values {sorted(uniq)}")
-            return vals[0], True
+    # Apply row-gap cutoff on unified list
+    side_seq_nums = []
+    last_row = None
 
-        # gather merged and unmerged numeric blocks in order
-        collected = []
-        seen_blocks = set()
-        for sheet_row in df_num.index:
-            if not (r_min <= sheet_row <= r_max):
-                continue
-            block = find_block(sheet_row, chosen_col)
-            if block:
-                if block in seen_blocks:
-                    continue
-                seen_blocks.add(block)
-                (r1, r2, c1, c2) = block
-                val, _ = get_block_value_and_flag(r1, r2, c1, c2)
-                if val is not None:
-                    collected.append((r1, val, True))
-            else:
-                # unmerged numeric?
-                v = ws.cell(sheet_row, chosen_col).value
-                if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                    collected.append((sheet_row, float(str(v).strip()), False))
+    for (row, val) in combined:
+        if last_row is not None:
+            if (row - last_row) > 2:
+                break
+        side_seq_nums.append(val)
+        last_row = row
 
-        # sort by sheet row (top to bottom)
-        collected.sort(key=lambda x: x[0])
+    side_seq_trimmed = side_seq_nums
 
-        # Apply hybrid gap rule:
-        # - merged blocks always accepted
-        # - unmerged must have gap <= 1 from last unmerged accepted
-        side_seq_list = []
-        last_unmerged_row = None
-        for rowpos, val, is_merged in collected:
-            if is_merged:
-                side_seq_list.append(val)
-            else:
-                if last_unmerged_row is None:
-                    side_seq_list.append(val)
-                    last_unmerged_row = rowpos
-                else:
-                    if (rowpos - last_unmerged_row) <= 2:
-                        side_seq_list.append(val)
-                        last_unmerged_row = rowpos
-                    else:
-                        break
+    # ===========================================
+    # FORMAT OUTPUT
+    # ===========================================
 
-    # Formatting sequences to strip .0 when integer
-    def fmt_list(vals):
+    def _fmt(vals):
         out = []
         for v in vals:
             s = str(v)
@@ -458,8 +388,12 @@ def extract_kld_data_from_bytes(xl_bytes):
             out.append(s)
         return out
 
-    top_seq_str = ",".join(fmt_list(top_seq_list))
-    side_seq_str = ",".join(fmt_list(side_seq_list))
+    top_seq_str = ",".join(_fmt(top_seq_trimmed))
+    side_seq_str = ",".join(_fmt(side_seq_trimmed))
+
+    # ===========================================
+    # FINAL RETURN
+    # ===========================================
 
     return {
         "job_name": job_name,
@@ -472,9 +406,11 @@ def extract_kld_data_from_bytes(xl_bytes):
     }
 
 
+
 # ===========================================
 # SVG generator (kept EXACTLY as your original)
 # ===========================================
+
 def make_svg(data, line_spacing_mm=5.0):
 
     import re
@@ -704,11 +640,10 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append('</svg>')
 
     return "\n".join(out)
-
-
 # ===========================================
 # Streamlit App with STRICT VALIDATION
 # ===========================================
+
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
 if uploaded_file:
@@ -721,7 +656,7 @@ if uploaded_file:
             import re
             parts = re.split(r"[,;|]", str(src))
             return [
-                float(p.strip())
+                float(p.strip()) 
                 for p in parts
                 if re.match(r"^-?\d+(?:\.\d+)?$", p.strip())
             ]
@@ -777,3 +712,4 @@ if uploaded_file:
 
 else:
     st.info("Please upload the Excel (.xlsx) file to begin.")
+
