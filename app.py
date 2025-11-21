@@ -31,7 +31,7 @@ def first_pair_from_text(text):
     text = str(text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*[*xX]\s*(\d+(?:\.\d+)?)", text)
     if m:
-        return int(float(m.group(1))), int(float(m.group(2)))
+        return float(m.group(1)), float(m.group(2))
     return 0, 0
 
 
@@ -263,8 +263,8 @@ def extract_kld_data_from_bytes(xl_bytes):
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
-    top_seq_str = ",".join(str(int(v)) for v in top_seq_trimmed)
-    side_seq_str = ",".join(str(int(v)) for v in side_seq_trimmed)
+    top_seq_str = ",".join(str(v) for v in top_seq_trimmed)
+    side_seq_str = ",".join(str(v) for v in side_seq_trimmed)
 
     return {
         "job_name": job_name,
@@ -342,7 +342,7 @@ def make_svg(data, line_spacing_mm=5.0):
                    f'x2="{margin+x}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
         mid = x - v / 2
         out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" '
-                   f'text-anchor="middle" class="text">{int(v)}</text>')
+                   f'text-anchor="middle" class="text">{v}</text>')
 
     y = 0
     out.append(f'<line x1="{margin-left_shift_left}" y1="{margin}" '
@@ -354,7 +354,7 @@ def make_svg(data, line_spacing_mm=5.0):
         out.append(f'<line x1="{margin-left_shift_left}" y1="{margin+y}" '
                    f'x2="{margin-left_shift_left-tick_short}" y2="{margin+y}" class="dieline"/>')
         out.append(f'<text x="{lx}" y="{margin+midY}" transform="rotate(-90 {lx} {margin+midY})" '
-                   f'text-anchor="middle" class="text">{int(v)}</text>')
+                   f'text-anchor="middle" class="text">{v}</text>')
 
     out.append('</g>')
 
@@ -383,7 +383,7 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append(f'<line x1="{wx}" y1="{margin}" x2="{wx}" y2="{margin+total_width}" class="dieline"/>')
     out.append(f'<text x="{wx+6}" y="{midY}" '
                f'transform="rotate(-90 {wx+6} {midY})" class="text" text-anchor="middle">'
-               f'width = {int(total_width)} mm</text>')
+               f'width = {total_width} mm</text>')
     out.append('</g>')
 
     total_height = sum(top_seq)
@@ -392,7 +392,7 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append(f'<line x1="{margin}" y1="{hy}" '
                f'x2="{margin+total_height}" y2="{hy}" class="dieline"/>')
     out.append(f'<text x="{margin+total_height/2}" y="{hy+6}" '
-               f'text-anchor="middle" class="text">height = {int(total_height)} mm</text>')
+               f'text-anchor="middle" class="text">height = {total_height} mm</text>')
     out.append('</g>')
 
     out.append('<g id="DynamicBoxes">')
@@ -466,7 +466,7 @@ if uploaded_file:
         width_mm = data["width_mm"]
 
         errors = []
-        if cut_length_mm and sum_top and sum_top != float(cut_length_mm):
+        if cut_length_mm and sum_top and abs(sum_top - float(cut_length_mm)) > 0.001:
             errors.append(
                 f"Sum of top_seq = {sum_top} mm does NOT match cut_length_mm = {cut_length_mm} mm."
             )
