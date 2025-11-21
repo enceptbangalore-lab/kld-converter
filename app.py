@@ -161,15 +161,25 @@ def extract_kld_data_from_bytes(xl_bytes):
 
             row_vals.append(sval)
 
-        if numeric_count >= 1:
+        if numeric_count >= 3:
             # numeric table begins here — stop collecting header
             break
 
-        line_text = " ".join(row_vals).strip()
-        if line_text:
-            header_lines.append(line_text)
-            if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
-                detected_dim_line = line_text
+        # ---------------------------------------------
+        # STRICT HEADER FILTER
+        # ---------------------------------------------
+        text_tokens = [
+            sval for sval in row_vals
+            if re.search(r"[A-Za-z]", sval)
+            and not re.match(r"^-?\d+(?:\.\d+)?$", sval)
+            and not sval.startswith("=")
+        ]
+
+        if len(text_tokens) >= 2 and numeric_count == 0:
+            merged = " ".join(text_tokens)
+            header_lines.append(merged)
+            if not detected_dim_line and re.search(r"dimension|width|cut", merged, re.IGNORECASE):
+                detected_dim_line = merged
 
     # Dimension extraction
     if detected_dim_line:
@@ -285,7 +295,7 @@ def make_svg(data, line_spacing_mm=5.0):
     canvas_H = H + extra
 
     dieline = "#92278f"
-    stroke_pt = 0.190
+    stroke_pt = 0.356
     font_mm = 0.8
     tick_short = 5
     top_shift_up = 5
