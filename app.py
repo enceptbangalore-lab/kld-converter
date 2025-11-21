@@ -408,16 +408,16 @@ if uploaded_file:
         st.success("✅ Dimensions validated. No mismatches detected.")
         st.download_button("⬇️ Download SVG File", svg, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
 
-        side_start = data["side_seq"][0] if data["side_seq"] else None
-top_start = data["top_seq"][0] if data["top_seq"] else None
+        side_start = side_seq[0] if side_seq else None
+        top_start = top_seq[0] if top_seq else None
 
-st.code(
-    f"side_seq: {data['side_seq']}\n"
-    f"side_seq starts at row: {side_start}\n\n"
-    f"top_seq: {data['top_seq']}\n"
-    f"top_seq starts at row: {top_start}",
-    language="text"
-)
+        st.code(
+            f"side_seq: {data['side_seq']}\n"
+            f"side_seq starts at row: {side_start}\n\n"
+            f"top_seq: {data['top_seq']}\n"
+            f"top_seq starts at row: {top_start}",
+            language="text"
+        )
 
 
     except Exception as e:
