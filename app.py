@@ -158,9 +158,13 @@ def extract_kld_data_from_bytes(xl_bytes):
 
     df_num = df.iloc[start_row:].reset_index(drop=True)
 
-    # Top sequence
+    # ============================
+    # Top sequence (patched logic)
+    # ============================
     top_seq_nums = []
     best_diff = float("inf")
+    best_top_row_idx = None
+
     for i in range(len(df_num)):
         nums = clean_numeric_list(df_num.iloc[i].tolist())
         if len(nums) >= 4:
@@ -168,8 +172,30 @@ def extract_kld_data_from_bytes(xl_bytes):
             if diff < best_diff:
                 best_diff = diff
                 top_seq_nums = nums
+                best_top_row_idx = i
 
+    # Map top sequence row back to Excel coordinates (if found)
+    top_seq_excel_row = None
+    top_seq_first_col_excel = None
+    top_seq_last_col_excel = None
+
+    if best_top_row_idx is not None:
+        # Determine numeric positions in that df_num row
+        numeric_positions = []
+        row_vals = df_num.iloc[best_top_row_idx].tolist()
+        for col_idx, val in enumerate(row_vals):
+            nums_in_cell = clean_numeric_list([val])
+            if nums_in_cell:
+                numeric_positions.append(col_idx)
+
+        if numeric_positions:
+            top_seq_first_col_excel = numeric_positions[0] + 1  # df columns are 0-based -> Excel 1-based
+            top_seq_last_col_excel = numeric_positions[-1] + 1
+            top_seq_excel_row = start_row + best_top_row_idx + 1  # Excel rows are 1-based
+
+    # ===========================================
     # Side sequence
+    # ===========================================
     side_seq_nums = []
     best_diff = float("inf")
     for c in df_num.columns:
@@ -184,6 +210,56 @@ def extract_kld_data_from_bytes(xl_bytes):
                         best_diff = diff
                         side_seq_nums = nums[i:j+1]
 
+    # ===========================================
+    # Limit header extraction based on top_seq_last_col_excel
+    # ===========================================
+    if top_seq_last_col_excel is not None:
+        header_lines_limited = []
+        detected_dim_line = ""
+        header_max_col = min(c_max, top_seq_last_col_excel)
+
+        for r in range(r_min, r_max + 1):
+            row_vals = []
+            numeric_count = 0
+            for c in range(c_min, header_max_col + 1):
+                val = ws.cell(r, c).value
+                if val is None:
+                    continue
+                sval = str(val).strip()
+                if sval == "":
+                    continue
+                if re.match(r"^-?\d+(\.\d+)?$", sval):
+                    numeric_count += 1
+                row_vals.append(sval)
+
+            if numeric_count >= 3:
+                break
+
+            line_text = " ".join(row_vals).strip()
+            if line_text:
+                header_lines_limited.append(line_text)
+                if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
+                    detected_dim_line = line_text
+
+        if header_lines_limited:
+            header_lines = header_lines_limited
+            if detected_dim_line:
+                w_val, c_val = first_pair_from_text(detected_dim_line)
+            else:
+                w_val, c_val = (0, 0)
+                for ln in header_lines:
+                    t1, t2 = first_pair_from_text(ln)
+                    if t1 and t2:
+                        w_val, c_val = t1, t2
+                        break
+            width_mm = int(w_val) if w_val else width_mm
+            cut_length_mm = int(c_val) if c_val else cut_length_mm
+            dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
+            job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), job_name)
+
+    # ===========================================
+    # Final assembly of sequences
+    # ===========================================
     top_seq_trimmed = auto_trim_to_target(top_seq_nums, cut_length_mm)
     side_seq_trimmed = auto_trim_to_target(side_seq_nums, width_mm)
 
@@ -197,7 +273,10 @@ def extract_kld_data_from_bytes(xl_bytes):
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
         "top_seq": top_seq_str,
-        "side_seq": side_seq_str
+        "side_seq": side_seq_str,
+        "top_seq_excel_row": top_seq_excel_row,
+        "top_seq_first_col_excel": top_seq_first_col_excel,
+        "top_seq_last_col_excel": top_seq_last_col_excel
     }
 
 
@@ -221,7 +300,6 @@ def make_svg(data, line_spacing_mm=5.0):
     if not header_lines:
         header_lines = [data["job_name"], data["dimension_text"]]
 
-    # Artboard expansion
     extra = 60
     margin = extra / 2
     canvas_W = W + extra
@@ -245,7 +323,6 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Header
     out.append('<g id="Header">')
     cx = canvas_W / 2
     for i, line in enumerate(header_lines):
@@ -253,64 +330,71 @@ def make_svg(data, line_spacing_mm=5.0):
         out.append(f'<text x="{cx}" y="{y}" text-anchor="middle" class="text">{line}</text>')
     out.append('</g>')
 
-    # Dieline
     out.append(f'<rect x="{margin}" y="{margin}" width="{W}" height="{H}" class="dieline"/>')
 
-    # Measurements group
     out.append('<g id="Measurements">')
     x = 0
-    out.append(f'<line x1="{margin}" y1="{margin-top_shift_up}" x2="{margin}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
+    out.append(f'<line x1="{margin}" y1="{margin-top_shift_up}" '
+               f'x2="{margin}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
     for v in top_seq:
         x += v
-        out.append(f'<line x1="{margin+x}" y1="{margin-top_shift_up}" x2="{margin+x}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
+        out.append(f'<line x1="{margin+x}" y1="{margin-top_shift_up}" '
+                   f'x2="{margin+x}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>')
         mid = x - v / 2
-        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(f'<text x="{margin+mid}" y="{margin-top_shift_up-tick_short-1+top_text_shift_down}" '
+                   f'text-anchor="middle" class="text">{int(v)}</text>')
 
     y = 0
-    out.append(f'<line x1="{margin-left_shift_left}" y1="{margin}" x2="{margin-left_shift_left-tick_short}" y2="{margin}" class="dieline"/>')
+    out.append(f'<line x1="{margin-left_shift_left}" y1="{margin}" '
+               f'x2="{margin-left_shift_left-tick_short}" y2="{margin}" class="dieline"/>')
     for v in side_seq:
         y += v
-        out.append(f'<line x1="{margin-left_shift_left}" y1="{margin+y}" x2="{margin-left_shift_left-tick_short}" y2="{margin+y}" class="dieline"/>')
         midY = y - v / 2
         lx = margin - left_shift_left - tick_short - 2 + left_text_shift_right
-        out.append(f'<text x="{lx}" y="{margin+midY}" transform="rotate(-90 {lx} {margin+midY})" text-anchor="middle" class="text">{int(v)}</text>')
+        out.append(f'<line x1="{margin-left_shift_left}" y1="{margin+y}" '
+                   f'x2="{margin-left_shift_left-tick_short}" y2="{margin+y}" class="dieline"/>')
+        out.append(f'<text x="{lx}" y="{margin+midY}" transform="rotate(-90 {lx} {margin+midY})" '
+                   f'text-anchor="middle" class="text">{int(v)}</text>')
+
     out.append('</g>')
 
-    # Crop marks
     out.append('<g id="CropMarks">')
-    out.append(f'<line x1="{margin+W+crop_off}" y1="{margin}" x2="{margin+W+crop_off+crop_len}" y2="{margin}" class="dieline"/>')
-    out.append(f'<line x1="{margin+W+crop_off}" y1="{margin+H}" x2="{margin+W+crop_off+crop_len}" y2="{margin+H}" class="dieline"/>')
+    out.append(f'<line x1="{margin+W+crop_off}" y1="{margin}" '
+               f'x2="{margin+W+crop_off+crop_len}" y2="{margin}" class="dieline"/>')
+    out.append(f'<line x1="{margin+W+crop_off}" y1="{margin+H}" '
+               f'x2="{margin+W+crop_off+crop_len}" y2="{margin+H}" class="dieline"/>')
     out.append('</g>')
 
-    # Photocell mark
     photocell_w, photocell_h = 6, 12
     pc_x = margin + W - photocell_w
     pc_y = margin
-
     out.append('<g id="Photocell">')
     out.append(f'<rect x="{pc_x}" y="{pc_y}" width="{photocell_w}" height="{photocell_h}" class="dieline"/>')
-    out.append(f'<line x1="{pc_x+photocell_w}" y1="{pc_y}" x2="{pc_x+photocell_w+3}" y2="{pc_y-3}" class="dieline"/>')
-    out.append(f'<text x="{pc_x+photocell_w+2}" y="{pc_y-4}" class="text">Photocell Mark {photocell_w}×{photocell_h} mm</text>')
+    out.append(f'<line x1="{pc_x+photocell_w}" y1="{pc_y}" '
+               f'x2="{pc_x+photocell_w+3}" y2="{pc_y-3}" class="dieline"/>')
+    out.append(f'<text x="{pc_x+photocell_w+2}" y="{pc_y-4}" class="text">'
+               f'Photocell Mark {photocell_w}×{photocell_h} mm</text>')
     out.append('</g>')
 
-    # Width marker
     total_width = sum(side_seq)
     wx = pc_x + photocell_w + 4
     midY = margin + total_width / 2
     out.append('<g id="WidthMarker">')
     out.append(f'<line x1="{wx}" y1="{margin}" x2="{wx}" y2="{margin+total_width}" class="dieline"/>')
-    out.append(f'<text x="{wx+6}" y="{midY}" transform="rotate(-90 {wx+6} {midY})" class="text" text-anchor="middle">width = {int(total_width)} mm</text>')
+    out.append(f'<text x="{wx+6}" y="{midY}" '
+               f'transform="rotate(-90 {wx+6} {midY})" class="text" text-anchor="middle">'
+               f'width = {int(total_width)} mm</text>')
     out.append('</g>')
 
-    # Height marker
     total_height = sum(top_seq)
     hy = margin + total_width + 5
     out.append('<g id="HeightMarker">')
-    out.append(f'<line x1="{margin}" y1="{hy}" x2="{margin+total_height}" y2="{hy}" class="dieline"/>')
-    out.append(f'<text x="{margin+total_height/2}" y="{hy+6}" text-anchor="middle" class="text">height = {int(total_height)} mm</text>')
+    out.append(f'<line x1="{margin}" y1="{hy}" '
+               f'x2="{margin+total_height}" y2="{hy}" class="dieline"/>')
+    out.append(f'<text x="{margin+total_height/2}" y="{hy+6}" '
+               f'text-anchor="middle" class="text">height = {int(total_height)} mm</text>')
     out.append('</g>')
 
-    # Dynamic boxes
     out.append('<g id="DynamicBoxes">')
     if top_seq and side_seq:
         max_top = max(top_seq)
@@ -324,35 +408,34 @@ def make_svg(data, line_spacing_mm=5.0):
             skip += 3
     out.append('</g>')
 
-    # Seals
     out.append('<g id="Seals">')
-
     total_side = sum(side_seq)
     mid_side = margin + total_side / 2
     first_top = top_seq[0]
     last_top = top_seq[-1]
 
-    # Left END SEAL
     left_end_x = margin + first_top / 2
-    out.append(f'<text x="{left_end_x}" y="{mid_side}" transform="rotate(-90 {left_end_x} {mid_side})" text-anchor="middle" class="text">END SEAL</text>')
+    out.append(f'<text x="{left_end_x}" y="{mid_side}" '
+               f'transform="rotate(-90 {left_end_x} {mid_side})" '
+               f'text-anchor="middle" class="text">END SEAL</text>')
 
-    # Right END SEAL
     right_end_x = margin + W - last_top / 2
-    out.append(f'<text x="{right_end_x}" y="{mid_side}" transform="rotate(90 {right_end_x} {mid_side})" text-anchor="middle" class="text">END SEAL</text>')
+    out.append(f'<text x="{right_end_x}" y="{mid_side}" '
+               f'transform="rotate(90 {right_end_x} {mid_side})" '
+               f'text-anchor="middle" class="text">END SEAL</text>')
 
-    # Center Seals
     total_top = sum(top_seq)
     mid_top_x = margin + total_top / 2
-
     first_side = side_seq[0]
     last_side = side_seq[-1]
 
     top_center_y = margin + first_side / 2
     bottom_center_y = margin + total_side - last_side / 2
 
-    out.append(f'<text x="{mid_top_x}" y="{top_center_y}" text-anchor="middle" class="text">CENTER SEAL</text>')
-    out.append(f'<text x="{mid_top_x}" y="{bottom_center_y}" text-anchor="middle" class="text">CENTER SEAL</text>')
-
+    out.append(f'<text x="{mid_top_x}" y="{top_center_y}" '
+               f'text-anchor="middle" class="text">CENTER SEAL</text>')
+    out.append(f'<text x="{mid_top_x}" y="{bottom_center_y}" '
+               f'text-anchor="middle" class="text">CENTER SEAL</text>')
     out.append('</g>')
 
     out.append('</svg>')
@@ -369,7 +452,6 @@ if uploaded_file:
         raw = uploaded_file.read()
         data = extract_kld_data_from_bytes(raw)
 
-        # Parse sequences for validation
         def parse_seq_list(src):
             parts = re.split(r"[,;|]", str(src))
             return [float(p.strip()) for p in parts if re.match(r"^\d+(\.\d+)?$", p.strip())]
@@ -383,9 +465,7 @@ if uploaded_file:
         cut_length_mm = data["cut_length_mm"]
         width_mm = data["width_mm"]
 
-        # Strict validation
         errors = []
-
         if cut_length_mm and sum_top and sum_top != float(cut_length_mm):
             errors.append(
                 f"Sum of top_seq = {sum_top} mm does NOT match cut_length_mm = {cut_length_mm} mm."
@@ -396,29 +476,28 @@ if uploaded_file:
                 f"Sum of side_seq = {sum_side} mm does NOT match width_mm = {width_mm} mm."
             )
 
-        # Block download if any mismatch
         if errors:
             st.error("❌ SVG generation blocked due to mismatched dimensions:")
             for e in errors:
                 st.write(f"- {e}")
             st.stop()
 
-        # All good → generate SVG
         svg = make_svg(data)
         st.success("✅ Dimensions validated. No mismatches detected.")
         st.download_button("⬇️ Download SVG File", svg, f"{uploaded_file.name}_layout.svg", "image/svg+xml")
 
         side_start = side_seq[0] if side_seq else None
-        top_start = top_seq[0] if top_seq else None
+        top_start = data.get("top_seq_excel_row", None)
+        top_last_col = data.get("top_seq_last_col_excel", None)
 
         st.code(
             f"side_seq: {data['side_seq']}\n"
             f"side_seq starts at row: {side_start}\n\n"
             f"top_seq: {data['top_seq']}\n"
-            f"top_seq starts at row: {top_start}",
+            f"top_seq starts at Excel row: {top_start}\n"
+            f"top_seq ends at Excel column: {top_last_col}",
             language="text"
         )
-
 
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
