@@ -20,20 +20,31 @@ def trim_with_gap_limit(values, target_sum, max_gap=1):
     cleaned = []
     gap = 0
     running_sum = 0
+
     for v in values:
-        try: fv=float(v)
-        except: fv=None
-        if fv is None or fv==0:
+        try:
+            fv = float(v)
+        except:
+            fv = None
+
+        # treat invalid or zero as a gap slot
+        if fv is None or fv == 0:
             gap += 1
             if gap > max_gap:
                 break
             continue
+
+        # good numeric value
         cleaned.append(fv)
         running_sum += fv
         gap = 0
-        if target_sum>0 and running_sum>=target_sum:
+
+        # stop if target reached
+        if target_sum > 0 and running_sum >= target_sum:
             break
+
     return cleaned
+
 
     out = []
     for v in seq:
@@ -244,6 +255,7 @@ def extract_kld_data_from_bytes(xl_bytes):
     side_seq_nums=clean_numeric_list(df_num[side_col].tolist())
     top_seq_trimmed = trim_with_gap_limit(top_seq_nums, cut_length_mm, max_gap=1)
     side_seq_trimmed = trim_with_gap_limit(side_seq_nums, width_mm, max_gap=1)
+
 
     # keep decimals, but remove trailing .0 where possible
     def _fmt_list(vals):
