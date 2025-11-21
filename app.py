@@ -1,4 +1,4 @@
-# app.py
+# app.py — Part 1 of 4
 import streamlit as st
 import pandas as pd
 import re
@@ -14,7 +14,7 @@ st.title("📏 KLD Excel → SVG Generator (Grey-detect + Seals + Strict Validat
 st.caption("Detects grey header region, extracts header until numeric table, applies strict dimension validation, and generates SVG dieline.")
 
 # ===========================================
-# Helpers (Clean, Correct, Fully Rebuilt)
+# Helpers (Clean, Correct)
 # ===========================================
 
 def clean_numeric_list(seq):
@@ -50,12 +50,11 @@ def first_pair_from_text(text):
 
 
 # ===========================================
-# Grey detection (kept exactly as your logic)
+# Grey detection (kept as before)
 # ===========================================
 def cell_is_filled(cell):
     """
     Returns True if the cell has a visible non-white fill.
-    Follows your original logic exactly (Option 1).
     """
     try:
         fl = getattr(cell, "fill", None)
@@ -77,7 +76,6 @@ def cell_is_filled(cell):
                 return False
             return True
 
-        # If no rgb but theme/index exists → consider filled
         if getattr(fg, "indexed", None) is not None or getattr(fg, "theme", None) is not None:
             return True
 
@@ -88,15 +86,17 @@ def cell_is_filled(cell):
 
 
 # ===========================================
-# Extraction (full implementation)
+# Extraction (beginning)
+# Part 2 will include numeric-table scanning & sequences
 # ===========================================
 def extract_kld_data_from_bytes(xl_bytes):
     bytes_io = io.BytesIO(xl_bytes)
 
-    # --- Load workbook for grey detection ---
+    # Load workbook and worksheet
     wb = load_workbook(bytes_io, data_only=True, read_only=False)
     ws = wb.active
 
+    # Detect filled positions (grey header)
     filled_positions = []
     for r in range(1, ws.max_row + 1):
         for c in range(1, ws.max_column + 1):
@@ -106,31 +106,29 @@ def extract_kld_data_from_bytes(xl_bytes):
             except:
                 continue
 
-    # --- Determine grey region bounds ---
+    # Determine grey region bounds (if any)
     if filled_positions:
         rows = [r for r, _ in filled_positions]
         cols = [c for _, c in filled_positions]
         r_min, r_max = min(rows), max(rows)
         c_min, c_max = min(cols), max(cols)
     else:
-        # Fallback defaults (your original behavior)
+        # fallback defaults
         r_min, r_max, c_min, c_max = 2, 68, 2, 28
         r_max = min(r_max, ws.max_row)
         c_max = min(c_max, ws.max_column)
 
-    # --- Build per-row grey col map ---
+    # Build grey cols by row map
     grey_cols_by_row = {}
     for r, c in filled_positions:
         grey_cols_by_row.setdefault(r, set()).add(c)
 
-    # --- HEADER extraction using grey columns ---
+    # Header extraction using grey columns
     header_lines = []
     detected_dim_line = ""
 
     if grey_cols_by_row:
-        rows_to_scan = sorted(
-            r for r in grey_cols_by_row.keys() if r_min <= r <= r_max
-        )
+        rows_to_scan = sorted(r for r in grey_cols_by_row.keys() if r_min <= r <= r_max)
     else:
         rows_to_scan = list(range(r_min, r_max + 1))
 
@@ -138,7 +136,7 @@ def extract_kld_data_from_bytes(xl_bytes):
         row_vals = []
         numeric_count = 0
 
-        # Use only the grey columns for this row
+        # Use only grey columns for header extraction
         if r in grey_cols_by_row:
             cols = sorted(grey_cols_by_row[r])
         else:
@@ -157,19 +155,17 @@ def extract_kld_data_from_bytes(xl_bytes):
 
             row_vals.append(sval)
 
-        # Stop when numeric structure begins
+        # Stop header collection when numeric table begins
         if numeric_count >= 3:
             break
 
         line_text = " ".join(row_vals).strip()
         if line_text:
             header_lines.append(line_text)
-            if not detected_dim_line and re.search(
-                r"dimension|width|cut", line_text, re.IGNORECASE
-            ):
+            if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
                 detected_dim_line = line_text
 
-    # --- Dimension extraction (unchanged) ---
+    # Dimension extraction
     if detected_dim_line:
         w_val, c_val = first_pair_from_text(detected_dim_line)
     else:
@@ -183,298 +179,401 @@ def extract_kld_data_from_bytes(xl_bytes):
     width_mm = int(w_val) if w_val else 0
     cut_length_mm = int(c_val) if c_val else 0
 
-    dimension_text = (
-        f"Dimension ( Width * Cut-off length ) : "
-        f"{width_mm} * {cut_length_mm} ( in mm )"
-    )
+    dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
 
-    job_name = next(
-        (ln for ln in header_lines if re.search(r"[A-Za-z]", ln)),
-        "KLD Layout"
-    )
+    job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
 
-    # --- Load into pandas for numeric-table extraction ---
+    # --- Prepare for numeric-table scanning (Parts 2..4 will follow) ---
+    # Keep workbook (ws), df_orig (pandas with original indices), start_row_index, etc.
     bytes_io.seek(0)
-    # preserve original indices so that we can map back to real Excel rows
     df_orig = pd.read_excel(bytes_io, header=None, engine="openpyxl")
     df_orig = df_orig.fillna("").astype(str)
-
-    # Remove fully blank rows but KEEP original Excel row indices
     mask = df_orig.apply(lambda r: any(str(x).strip() for x in r), axis=1)
     df = df_orig[mask]
 
-    # --- Determine numeric-table start row using df (which keeps original indices) ---
+    # find numeric-table start row (index in original df)
     start_row_index = None
-    # iterate over df rows in original index order
     for idx in df.index[:min(120, len(df))]:
-        numeric_count = sum(
-            1 for c in df.loc[idx].tolist() if re.match(r"^\d+(\.\d+)?$", str(c).strip())
-        )
+        numeric_count = sum(1 for c in df.loc[idx].tolist() if re.match(r"^\d+(\.\d+)?$", str(c).strip()))
         if numeric_count >= 3:
             start_row_index = idx
             break
-
     if start_row_index is None:
-        # fallback: use first non-empty row of df
-        if len(df.index) > 0:
-            start_row_index = df.index[0]
-        else:
-            start_row_index = 0
+        start_row_index = df.index[0] if len(df.index) else 0
 
-    # df_num is the slice from start_row_index onward (preserve index)
+    # df_num preserves original Excel indices
     df_num = df.loc[start_row_index:].copy()
 
-    # -------------------------
-    # TOP SEQUENCE (horizontal)
-    # -------------------------
-    # Identify rows inside the grey box (use df_num index list intersecting r_min..r_max)
-    candidate_rows = [r for r in df_num.index if r_min <= r <= r_max]
-
-    # Choose first qualifying row (row that has more than 2 numeric values across grey columns)
-    top_row_choice = None
-    for r in candidate_rows:
-        numeric_count = 0
-        for c in range(c_min, c_max + 1):
-            sval = str(df_num.at[r, c]) if c in df_num.columns else ""
-            if re.match(r"^-?\d+(?:\.\d+)?$", str(sval).strip()):
-                numeric_count += 1
-        if numeric_count > 2:
-            top_row_choice = r
-            break
-
-    top_seq_list = []
-
-    if top_row_choice is not None:
-        # Build merged ranges lookup
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
-
-        def find_merged_block_for_cell(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
-            return None
-
-        def get_block_value(r1, r2, c1, c2):
-            vals = []
-            for rr in range(r1, r2 + 1):
-                for cc in range(c1, c2 + 1):
-                    v = ws.cell(rr, cc).value
-                    if v is None:
-                        continue
-                    sval = str(v).strip()
-                    if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                        vals.append(float(sval))
-            if not vals:
-                return None, False
-            uniq = set(vals)
-            if len(uniq) > 1:
-                raise ValueError(f"Merged block {r1}-{r2},{c1}-{c2} has conflicting values {sorted(uniq)}")
-            return vals[0], True  # True indicates merged-block value
-
-        # Scan left-to-right across grey columns (c_min..c_max), collecting blocks
-        collected = []
-        seen_blocks = set()
-        for c in range(c_min, c_max + 1):
-            sheet_r = top_row_choice
-            block = find_merged_block_for_cell(sheet_r, c)
-            if block:
-                (r1, r2, c1, c2) = block
-                block_id = (r1, r2, c1, c2)
-                if block_id in seen_blocks:
-                    continue
-                seen_blocks.add(block_id)
-                val, is_merged = get_block_value(r1, r2, c1, c2)
-                if val is not None:
-                    # use the left-most column of the block as block position
-                    block_col_position = c1
-                    collected.append((block_col_position, val, True))
-            else:
-                # unmerged cell at (top_row_choice, c)
-                sval = ws.cell(top_row_choice, c).value
-                if sval is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(sval).strip()):
-                    collected.append((c, float(str(sval).strip()), False))
-
-        # sort collected by column position
-        collected.sort(key=lambda x: x[0])
-
-        # Apply the gap rule: merged blocks always accepted; unmerged must respect gap <= 1
-        top_seq_list = []
-        last_unmerged_col = None
-        for colpos, val, is_merged in collected:
-            if is_merged:
-                top_seq_list.append(val)
-            else:
-                if last_unmerged_col is None:
-                    top_seq_list.append(val)
-                    last_unmerged_col = colpos
-                else:
-                    if (colpos - last_unmerged_col) <= 2:
-                        top_seq_list.append(val)
-                        last_unmerged_col = colpos
-                    else:
-                        break  # gap limit exceeded for unmerged sequence
-
-    # --------------------------
-    # SIDE SEQUENCE (vertical)
-    # --------------------------
-    # Determine candidate columns inside grey-box
-    candidate_cols = [c for c in range(c_min, c_max + 1) if c in df_num.columns]
-
-    # For each candidate column, compute how many numeric items (counting merged blocks as 1)
-    def count_numeric_items_in_column(excel_col):
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
-
-        def find_block(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
-            return None
-
-        seen = set()
-        count = 0
-        # iterate df_num in original sheet row order
-        for sheet_row in df_num.index:
-            # only consider rows inside grey region vertically
-            if not (r_min <= sheet_row <= r_max):
-                continue
-            block = find_block(sheet_row, excel_col)
-            if block:
-                if block in seen:
-                    continue
-                seen.add(block)
-                # check if merged block has numeric value
-                r1, r2, c1, c2 = block
-                found_num = False
-                for rr in range(r1, r2 + 1):
-                    for cc in range(c1, c2 + 1):
-                        v = ws.cell(rr, cc).value
-                        if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                            found_num = True
-                            break
-                    if found_num:
-                        break
-                if found_num:
-                    count += 1
-            else:
-                # unmerged cell
-                v = ws.cell(sheet_row, excel_col).value
-                if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                    count += 1
-        return count
-
-    # select the first (left-most) qualifying column that has >2 numeric items
-    qualifying_cols = []
-    for col in candidate_cols:
-        cnt = count_numeric_items_in_column(col)
-        if cnt > 2:
-            qualifying_cols.append(col)
-
-    side_seq_list = []
-    if qualifying_cols:
-        chosen_col = qualifying_cols[0]
-
-        # Build merged ranges list for lookups
-        merged_ranges = []
-        for rng in ws.merged_cells.ranges:
-            merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
-
-        def find_block(r, c):
-            for (r1, r2, c1, c2) in merged_ranges:
-                if r1 <= r <= r2 and c1 <= c <= c2:
-                    return (r1, r2, c1, c2)
-            return None
-
-        def get_block_value_and_flag(r1, r2, c1, c2):
-            vals = []
-            for rr in range(r1, r2 + 1):
-                for cc in range(c1, c2 + 1):
-                    v = ws.cell(rr, cc).value
-                    if v is None:
-                        continue
-                    sval = str(v).strip()
-                    if re.match(r"^-?\d+(?:\.\d+)?$", sval):
-                        vals.append(float(sval))
-            if not vals:
-                return None, True  # merged but no numeric
-            uniq = set(vals)
-            if len(uniq) > 1:
-                raise ValueError(f"Merged block {r1}-{r2},{c1}-{c2} conflicting values {sorted(uniq)}")
-            return vals[0], True
-
-        # gather merged and unmerged numeric blocks in order
-        collected = []
-        seen_blocks = set()
-        for sheet_row in df_num.index:
-            if not (r_min <= sheet_row <= r_max):
-                continue
-            block = find_block(sheet_row, chosen_col)
-            if block:
-                if block in seen_blocks:
-                    continue
-                seen_blocks.add(block)
-                (r1, r2, c1, c2) = block
-                val, _ = get_block_value_and_flag(r1, r2, c1, c2)
-                if val is not None:
-                    collected.append((r1, val, True))
-            else:
-                # unmerged numeric?
-                v = ws.cell(sheet_row, chosen_col).value
-                if v is not None and re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()):
-                    collected.append((sheet_row, float(str(v).strip()), False))
-
-        # sort by sheet row (top to bottom)
-        collected.sort(key=lambda x: x[0])
-
-        # Apply hybrid gap rule:
-        # - merged blocks always accepted
-        # - unmerged must have gap <= 1 from last unmerged accepted
-        side_seq_list = []
-        last_unmerged_row = None
-        for rowpos, val, is_merged in collected:
-            if is_merged:
-                side_seq_list.append(val)
-            else:
-                if last_unmerged_row is None:
-                    side_seq_list.append(val)
-                    last_unmerged_row = rowpos
-                else:
-                    if (rowpos - last_unmerged_row) <= 2:
-                        side_seq_list.append(val)
-                        last_unmerged_row = rowpos
-                    else:
-                        break
-
-    # Formatting sequences to strip .0 when integer
-    def fmt_list(vals):
-        out = []
-        for v in vals:
-            s = str(v)
-            if "." in s:
-                s = s.rstrip("0").rstrip(".")
-            out.append(s)
-        return out
-
-    top_seq_str = ",".join(fmt_list(top_seq_list))
-    side_seq_str = ",".join(fmt_list(side_seq_list))
-
+    # Now we hand off to Part 2 which implements top_seq & side_seq scanning
+    # (I'll send Part 2 next if you want)
     return {
         "job_name": job_name,
         "header_lines": header_lines,
         "dimension_text": dimension_text,
         "width_mm": width_mm,
         "cut_length_mm": cut_length_mm,
-        "top_seq": top_seq_str,
-        "side_seq": side_seq_str,
+        # placeholders until Part 2 fills actual sequences
+        "top_seq": "",
+        "side_seq": "",
     }
+# ============================================================
+# PART 2 — NUMERIC TABLE SCANNING (side_seq + top_seq)
+# ============================================================
 
+def extract_sequences(ws, df_num, start_row_index, width_mm, cut_length_mm):
+    """
+    Returns: (top_seq_list, side_seq_list)
+    Using merged/unmerged logic, row/col gap logic, scanning entire sheet (Option D).
+    """
 
-# ===========================================
-# SVG generator (kept EXACTLY as your original)
-# ===========================================
+    # --------------------------------------------------------
+    # 1. Detect merged ranges in the worksheet
+    # --------------------------------------------------------
+    merged_ranges = []
+    for rng in ws.merged_cells.ranges:
+        merged_ranges.append((rng.min_row, rng.max_row, rng.min_col, rng.max_col))
+
+    def find_merged_block(r, c):
+        """Return (r1,r2,c1,c2) if cell is inside a merged block."""
+        for (r1, r2, c1, c2) in merged_ranges:
+            if r1 <= r <= r2 and c1 <= c <= c2:
+                return (r1, r2, c1, c2)
+        return None
+
+    def extract_block_value(r1, r2, c1, c2):
+        """Return single numeric value from merged block (must be consistent)."""
+        vals = []
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                v = ws.cell(rr, cc).value
+                if v is None:
+                    continue
+                sval = str(v).strip()
+                if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                    vals.append(float(sval))
+
+        if not vals:
+            return None
+        if len(set(vals)) > 1:
+            # conflicting values inside merged block → not allowed
+            raise ValueError(
+                f"Merged cell block {r1}-{r2} {c1}-{c2} contains multiple numeric values: {vals}"
+            )
+        return vals[0]
+
+    # --------------------------------------------------------
+    # 2. Identify qualifying vertical column for side_seq
+    # --------------------------------------------------------
+    col_numeric_counts = {}
+    for c in df_num.columns:
+        count = 0
+        for v in df_num[c].tolist():
+            sval = str(v).strip()
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                count += 1
+        col_numeric_counts[c] = count
+
+    # Select first column (left-most) with >= 2 numeric values
+    side_col = None
+    for c in df_num.columns:
+        if col_numeric_counts[c] >= 2:
+            side_col = c
+            break
+
+    if side_col is None:
+        return [], []  # No valid numeric columns found
+
+    excel_col = side_col + 1  # convert df column to Excel column index
+
+    # --------------------------------------------------------
+    # 3. Collect numeric blocks vertically (merged + unmerged)
+    # --------------------------------------------------------
+    collected = []  # list of (excel_row, numeric_value)
+    seen_blocks = set()
+
+    for df_idx in df_num.index:
+        excel_row = df_idx + 1  # df index → Excel row number
+        val = df_num.loc[df_idx, side_col]
+        sval = str(val).strip()
+
+        blk = find_merged_block(excel_row, excel_col)
+
+        if blk:
+            (r1, r2, c1, c2) = blk
+
+            # Avoid processing merged block twice
+            if (r1, r2, c1, c2) in seen_blocks:
+                continue
+            seen_blocks.add((r1, r2, c1, c2))
+
+            block_val = extract_block_value(r1, r2, c1, c2)
+            if block_val is not None:
+                collected.append((r1, block_val))
+
+        else:
+            # unmerged numeric cell
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                collected.append((excel_row, float(sval)))
+
+    # --------------------------------------------------------
+    # 4. Sort numeric blocks by row order
+    # --------------------------------------------------------
+    collected.sort(key=lambda x: x[0])
+
+    # --------------------------------------------------------
+    # 5. Apply merged/unmerged gap-logic (YOUR FINAL RULE)
+    # --------------------------------------------------------
+    side_seq = []
+    last_unmerged_row = None
+
+    for (row, value) in collected:
+        blk = find_merged_block(row, excel_col)
+
+        if blk:
+            # merged → always include
+            side_seq.append(value)
+            continue
+
+        # unmerged → apply gap logic
+        if last_unmerged_row is None:
+            side_seq.append(value)
+            last_unmerged_row = row
+            continue
+
+        gap = row - last_unmerged_row
+
+        if gap <= 2:  # ≤ 1 blank row allowed → gap 2 (1 blank) is OK
+            side_seq.append(value)
+            last_unmerged_row = row
+        else:
+            break  # STOP: more than 1 blank between unmerged values
+
+    # --------------------------------------------------------
+    # 6. TOP SEQUENCE (horizontal scanning mirror logic)
+    # --------------------------------------------------------
+    # find first row with >=2 numerics
+    row_numeric_counts = {}
+    for df_row in df_num.index:
+        row_list = df_num.loc[df_row].tolist()
+        cnt = sum(1 for v in row_list if re.match(r"^-?\d+(?:\.\d+)?$", str(v).strip()))
+        row_numeric_counts[df_row] = cnt
+
+    top_row = None
+    for r in df_num.index:
+        if row_numeric_counts[r] >= 2:
+            top_row = r
+            break
+
+    if top_row is None:
+        return [], side_seq  # no usable top row
+
+    # extract horizontally
+    collected_h = []
+    seen_blocks_h = set()
+
+    for c in df_num.columns:
+        excel_col = c + 1
+        excel_row = top_row + 1
+
+        val = df_num.loc[top_row, c]
+        sval = str(val).strip()
+
+        blk = find_merged_block(excel_row, excel_col)
+
+        if blk:
+            (r1, r2, c1, c2) = blk
+            if (r1, r2, c1, c2) in seen_blocks_h:
+                continue
+            seen_blocks_h.add((r1, r2, c1, c2))
+
+            block_val = extract_block_value(r1, r2, c1, c2)
+            if block_val is not None:
+                collected_h.append((c1, block_val))  # use leftmost column as position
+        else:
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                collected_h.append((excel_col, float(sval)))
+
+    # sort horizontally by column number
+    collected_h.sort(key=lambda x: x[0])
+
+    # apply horizontal gap logic
+    top_seq = []
+    last_unmerged_col = None
+
+    for (col, value) in collected_h:
+        blk = find_merged_block(top_row + 1, col)
+
+        if blk:
+            top_seq.append(value)
+            continue
+
+        if last_unmerged_col is None:
+            top_seq.append(value)
+            last_unmerged_col = col
+            continue
+
+        gap = col - last_unmerged_col
+
+        if gap <= 2:  # at most one blank column
+            top_seq.append(value)
+            last_unmerged_col = col
+        else:
+            break  # STOP
+
+    return top_seq, side_seq
+# ============================================================
+# PART 3 — Integrate sequence extraction into Part 1 function
+# ============================================================
+
+def extract_kld_data_from_bytes(xl_bytes):
+    bytes_io = io.BytesIO(xl_bytes)
+
+    # Load workbook and worksheet
+    wb = load_workbook(bytes_io, data_only=True, read_only=False)
+    ws = wb.active
+
+    # -----------------------------------------------
+    # GREY HEADER EXTRACTION (same as Part 1)
+    # -----------------------------------------------
+    filled_positions = []
+    for r in range(1, ws.max_row + 1):
+        for c in range(1, ws.max_column + 1):
+            try:
+                if cell_is_filled(ws.cell(r, c)):
+                    filled_positions.append((r, c))
+            except:
+                continue
+
+    if filled_positions:
+        rows = [r for r, _ in filled_positions]
+        cols = [c for _, c in filled_positions]
+        r_min, r_max = min(rows), max(rows)
+        c_min, c_max = min(cols), max(cols)
+    else:
+        r_min, r_max, c_min, c_max = 2, 68, 2, 28
+        r_max = min(r_max, ws.max_row)
+        c_max = min(c_max, ws.max_column)
+
+    grey_cols_by_row = {}
+    for r, c in filled_positions:
+        grey_cols_by_row.setdefault(r, set()).add(c)
+
+    header_lines = []
+    detected_dim_line = ""
+
+    if grey_cols_by_row:
+        rows_to_scan = sorted(r for r in grey_cols_by_row.keys() if r_min <= r <= r_max)
+    else:
+        rows_to_scan = list(range(r_min, r_max + 1))
+
+    for r in rows_to_scan:
+        row_vals = []
+        numeric_count = 0
+
+        cols = sorted(grey_cols_by_row[r]) if r in grey_cols_by_row else list(range(c_min, c_max + 1))
+
+        for c in cols:
+            val = ws.cell(r, c).value
+            if val is None:
+                continue
+            sval = str(val).strip()
+            if not sval:
+                continue
+
+            if re.match(r"^-?\d+(?:\.\d+)?$", sval):
+                numeric_count += 1
+
+            row_vals.append(sval)
+
+        if numeric_count >= 3:
+            break
+
+        line_text = " ".join(row_vals).strip()
+        if line_text:
+            header_lines.append(line_text)
+            if not detected_dim_line and re.search(r"dimension|width|cut", line_text, re.IGNORECASE):
+                detected_dim_line = line_text
+
+    if detected_dim_line:
+        w_val, c_val = first_pair_from_text(detected_dim_line)
+    else:
+        w_val, c_val = 0, 0
+        for ln in header_lines:
+            t1, t2 = first_pair_from_text(ln)
+            if t1 and t2:
+                w_val, c_val = t1, t2
+                break
+
+    width_mm = int(w_val) if w_val else 0
+    cut_length_mm = int(c_val) if c_val else 0
+
+    dimension_text = f"Dimension ( Width * Cut-off length ) : {width_mm} * {cut_length_mm} ( in mm )"
+    job_name = next((ln for ln in header_lines if re.search(r"[A-Za-z]", ln)), "KLD Layout")
+
+    # -----------------------------------------------
+    # LOAD WHOLE SHEET FOR NUMERIC TABLE (OPTION D)
+    # -----------------------------------------------
+    bytes_io.seek(0)
+    df_orig = pd.read_excel(bytes_io, header=None, engine="openpyxl")
+    df_orig = df_orig.fillna("").astype(str)
+
+    mask = df_orig.apply(lambda r: any(str(x).strip() for x in r), axis=1)
+    df = df_orig[mask]
+
+    start_row_index = None
+    for idx in df.index[: min(120, len(df))]:
+        numeric_count = sum(1 for c in df.loc[idx].tolist() if re.match(r"^\d+(\.\d+)?$", str(c).strip()))
+        if numeric_count >= 3:
+            start_row_index = idx
+            break
+
+    if start_row_index is None:
+        start_row_index = df.index[0]
+
+    df_num = df.loc[start_row_index:].copy()
+
+    # -----------------------------------------------
+    # PART 2: Extract sequences
+    # -----------------------------------------------
+    top_seq_list, side_seq_list = extract_sequences(
+        ws,           # worksheet
+        df_num,       # numeric-table dataframe
+        start_row_index,
+        width_mm,
+        cut_length_mm
+    )
+
+    # -----------------------------------------------
+    # FORMAT LISTS AS CSV STRINGS
+    # -----------------------------------------------
+    def fmt_list(lst):
+        out = []
+        for v in lst:
+            s = str(v)
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            out.append(s)
+        return ",".join(out)
+
+    top_seq = fmt_list(top_seq_list)
+    side_seq = fmt_list(side_seq_list)
+
+    # -----------------------------------------------
+    # FINAL RETURN STRUCTURE
+    # -----------------------------------------------
+    return {
+        "job_name": job_name,
+        "header_lines": header_lines,
+        "dimension_text": dimension_text,
+        "width_mm": width_mm,
+        "cut_length_mm": cut_length_mm,
+        "top_seq": top_seq,
+        "side_seq": side_seq,
+    }
+# ============================================================
+# PART 4 — SVG generator + Streamlit UI
+# ============================================================
+
 def make_svg(data, line_spacing_mm=5.0):
 
     import re
@@ -528,7 +627,7 @@ def make_svg(data, line_spacing_mm=5.0):
     out.append(f'.text{{font-family:Arial; font-size:{font_mm}mm; fill:{dieline};}}')
     out.append(']]></style></defs>')
 
-    # Header
+    # Header block
     out.append('<g id="Header">')
     cx = canvas_W / 2
     for i, line in enumerate(header_lines):
@@ -538,20 +637,21 @@ def make_svg(data, line_spacing_mm=5.0):
         )
     out.append('</g>')
 
-    # Dieline
+    # Dieline rectangle
     out.append(
         f'<rect x="{margin}" y="{margin}" width="{W}" height="{H}" class="dieline"/>'
     )
 
-    # Measurements group
+    # Measurements
     out.append('<g id="Measurements">')
 
-    # Top
+    # Top ticks
     x = 0
     out.append(
         f'<line x1="{margin}" y1="{margin-top_shift_up}" '
         f'x2="{margin}" y2="{margin-top_shift_up-tick_short}" class="dieline"/>'
     )
+
     for v in top_seq:
         x += v
         out.append(
@@ -564,12 +664,13 @@ def make_svg(data, line_spacing_mm=5.0):
             f'text-anchor="middle" class="text">{round(v, 2)}</text>'
         )
 
-    # Side
+    # Side ticks
     y = 0
     out.append(
         f'<line x1="{margin-left_shift_left}" y1="{margin}" '
         f'x2="{margin-left_shift_left-tick_short}" y2="{margin}" class="dieline"/>'
     )
+
     for v in side_seq:
         y += v
         out.append(
@@ -706,17 +807,19 @@ def make_svg(data, line_spacing_mm=5.0):
     return "\n".join(out)
 
 
-# ===========================================
-# Streamlit App with STRICT VALIDATION
-# ===========================================
+# ============================================================
+# STREAMLIT APP
+# ============================================================
+
 uploaded_file = st.file_uploader("Upload KLD Excel file", type=["xlsx", "xls"])
 
 if uploaded_file:
     try:
         raw = uploaded_file.read()
+
         data = extract_kld_data_from_bytes(raw)
 
-        # Convert sequences back to float list for validation
+        # Parse sequences for validation
         def parse_seq_list(src):
             import re
             parts = re.split(r"[,;|]", str(src))
@@ -748,16 +851,15 @@ if uploaded_file:
                 f"Sum of side_seq = {sum_side} mm does NOT match width_mm = {width_mm} mm."
             )
 
-        # If mismatched → block output
         if errors:
             st.error("❌ SVG generation blocked due to mismatched dimensions:")
             for e in errors:
                 st.write(f"- {e}")
             st.stop()
 
-        # Everything OK → generate SVG
         svg = make_svg(data)
         st.success("✅ Dimensions validated. No mismatches detected.")
+
         st.download_button(
             "⬇️ Download SVG File",
             svg,
@@ -765,12 +867,7 @@ if uploaded_file:
             "image/svg+xml"
         )
 
-        # Debug print
-        st.code(
-            f"side_seq: {data['side_seq']}\n"
-            f"top_seq: {data['top_seq']}",
-            language="text"
-        )
+        st.code(f"side_seq: {data['side_seq']}\ntop_seq: {data['top_seq']}", language="text")
 
     except Exception as e:
         st.error(f"❌ Conversion failed: {e}")
