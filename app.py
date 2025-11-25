@@ -5,9 +5,9 @@ import re
 import io
 from openpyxl import load_workbook
 
-st.set_page_config(page_title="KLD Excel → SVG Generator (Grey-detect, Seals)", layout="wide")
-st.title("📏 KLD Excel → SVG Generator (Grey-detect + Seals + Strict Validation)")
-st.caption("Detects grey header region, extracts header until numeric table, applies strict dimension validation, and generates SVG dieline.")
+st.set_page_config(page_title="Converting KLD from Excel to AI", layout="wide")
+st.title("Output will be in SVG format which can be opened in AI")
+st.caption("Ensure to double verify AI with Excel before pushing to AMT")
 
 # ===========================================
 # Helpers
