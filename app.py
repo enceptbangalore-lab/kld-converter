@@ -6,6 +6,7 @@ import io
 from openpyxl import load_workbook
 
 st.set_page_config(page_title="Converting KLD from Excel to AI", layout="wide")
+st.image("logo.png", width=180)
 st.title("Converting KLD from Excel to AI ")
 st.caption("Output will be in SVG format which can be opened in AI. Ensure to double verify AI with Excel before pushing to AMT")
 
